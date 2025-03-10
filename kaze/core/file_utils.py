@@ -1,6 +1,7 @@
 import os
 import subprocess
 import fnmatch
+import math  # Add this import
 
 
 def get_file_list(project_dir, include_pattern=None, exclude_pattern=None):
@@ -86,7 +87,7 @@ def get_file_list(project_dir, include_pattern=None, exclude_pattern=None):
     return processable_files
 
 
-def should_process_file(file_path, max_file_size_kb=8):
+def should_process_file(file_path, max_file_size_kb=100):
     """
     Checks if a file should be processed based on size and type.
     """

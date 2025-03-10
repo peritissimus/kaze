@@ -13,9 +13,12 @@ def query_embeddings(db_path, collection_name, query_text, limit, threshold):
             limit=limit,
             threshold=threshold,
         )
-        # Convert the results from the llm into a list of json serialziable dictionaries
+        # Convert the results from the llm into a list of json serializable dictionaries
         serializable_results = [dict(r) for r in results]
         return serializable_results
+    except sqlite3.OperationalError as e:
+        print(f"[red]Database error: {e}[/red]")
+        return []
     except Exception as e:
         print(f"[red]Error querying embeddings: {e}[/red]")
         return []

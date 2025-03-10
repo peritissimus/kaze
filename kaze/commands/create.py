@@ -82,13 +82,16 @@ def create(
 
     # Async Embedding Process
     async def embed_all_files(file_list):
-        tasks = [
-            asyncio.create_task(
-                embedding_utils.embed_file(file, model, db_path, collection)
-            )
-            for file in file_list
-        ]
-        results = await asyncio.gather(*tasks)
+        results = []
+        for file in file_list:
+            try:
+                result = await embedding_utils.embed_file(
+                    file, model, db_path, collection
+                )
+                results.append(result)
+            except Exception as e:
+                print(f"[red]Error embedding file {file}: {e}[/red]")
+                results.append(False)
         return results
 
     results = asyncio.run(embed_all_files(file_list))
