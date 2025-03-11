@@ -1,9 +1,12 @@
 import click
 import json
+
+import llm
 from kaze.core import db_utils
 from kaze.utils import display
 import os
 from rich import print
+import sqlite_utils
 
 
 @click.command()
@@ -28,6 +31,17 @@ from rich import print
     is_flag=True,
     help="Display human-readable output instead of JSON.",
 )
+@click.option(
+    "--best",
+    is_flag=True,
+    help="Only show the single best matching result.",
+)
+@click.option(
+    "--context",
+    type=int,
+    default=None,
+    help="Number of lines of context to show around the matching part.",
+)
 def query(
     project_dir,
     output_dir,
@@ -37,6 +51,8 @@ def query(
     collection,
     show_content,
     human_output,
+    best,
+    context,
 ):
     """Search for similar content across project files."""
     project_dir = os.path.abspath(project_dir)
@@ -53,15 +69,52 @@ def query(
             print(json.dumps({"error": "Database not found", "path": db_path}))
         return
 
+    # Connect to the database to check if collection exists
+    db = sqlite_utils.Database(db_path)
+    collections = []
+    try:
+        collections = llm.collections.list(database=db_path)
+    except Exception as e:
+        print(f"[yellow]Warning: Error listing collections: {e}[/yellow]")
+        try:
+            rows = db.query("SELECT name FROM collections")
+            collections = [row["name"] for row in rows]
+        except Exception as inner_e:
+            print(f"[red]Error querying collections table: {inner_e}[/red]")
+
+    if collection not in collections:
+        if human_output:
+            print(f"[red]Error: Collection '{collection}' not found in database[/red]")
+            print(f"Available collections: {', '.join(collections)}")
+        else:
+            print(
+                json.dumps(
+                    {
+                        "error": "Collection not found",
+                        "name": collection,
+                        "available": collections,
+                    }
+                )
+            )
+        return
+
     if human_output:
         print(f'[blue]🔍 Searching for: [cyan]"{query_text}"[/cyan]')
         print(f"[blue]📊 Using collection: [cyan]{collection}[/cyan]")
-        print(f"[blue]📚 Maximum results: [cyan]{limit}[/cyan]")
+        print(f"[blue]📚 Maximum results: [cyan]{limit if not best else 1}[/cyan]")
         print(f"[blue]🎯 Similarity threshold: [cyan]{threshold}[/cyan]")
 
-    results = db_utils.query_embeddings(
-        db_path, collection, query_text, limit, threshold
-    )
+    # Get the results
+    if best:
+        # Get only the best result
+        results = [db_utils.find_most_similar(db_path, collection, query_text)]
+        if results[0] is None:
+            results = []
+    else:
+        # Get multiple results
+        results = db_utils.query_embeddings(
+            db_path, collection, query_text, limit, threshold
+        )
 
     if not results:
         if human_output:
@@ -71,6 +124,6 @@ def query(
         return
 
     if human_output:
-        display.display_human_results(results, project_dir, show_content)
+        display.display_human_results(results, project_dir, show_content, context)
     else:
         print(json.dumps(results))

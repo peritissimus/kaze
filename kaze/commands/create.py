@@ -1,10 +1,11 @@
 import click
+import llm
 from kaze.core import file_utils, embedding_utils, db_utils
 from kaze.utils import config
 import os
 from rich import print
-import tiktoken
 import asyncio
+import sqlite_utils
 
 
 @click.command()
@@ -19,8 +20,8 @@ import asyncio
 @click.option(
     "-m", "--model", default="text-embedding-3-small", help="Embedding model to use."
 )
-@click.option("-s", "--size", default=8, type=int, help="Maximum file size in KB.")
-@click.option("-b", "--batch", default=10, type=int, help="Batch size for processing.")
+@click.option("-s", "--size", default=100, type=int, help="Maximum file size in KB.")
+@click.option("-b", "--batch", default=20, type=int, help="Batch size for processing.")
 @click.option("-c", "--collection", default="files", help="Collection name.")
 @click.option(
     "-f", "--force", is_flag=True, help="Force recreation of embeddings database."
@@ -37,6 +38,11 @@ import asyncio
     default=None,
     help="Additional files to exclude (glob pattern).",
 )
+@click.option(
+    "--verify",
+    is_flag=True,
+    help="Verify embedding model is available.",
+)
 def create(
     project_dir,
     output_dir,
@@ -47,6 +53,7 @@ def create(
     force,
     include_pattern,
     exclude_pattern,
+    verify,
 ):
     """Create embeddings for files in the project."""
 
@@ -58,17 +65,44 @@ def create(
     print(f"[blue]💾 Embeddings will be saved to [cyan]{db_path}[/cyan]")
     print(f"[blue]🧠 Using model: [cyan]{model}[/cyan]")
 
+    # Verify the embedding model
+    if verify:
+        try:
+            print(f"[blue]🔍 Verifying embedding model: [cyan]{model}[/cyan]")
+            embedding_model = llm.get_embedding_model(model)
+            print(f"[green]✅ Model verified: [cyan]{embedding_model.model_id}[/cyan]")
+        except Exception as e:
+            print(f"[red]❌ Error: Could not load embedding model '{model}': {e}[/red]")
+            return
+
     os.makedirs(kaze_dir, exist_ok=True)
 
+    # Initialize the database
+    db = sqlite_utils.Database(db_path)
+
+    # Handle force flag
     if force and os.path.exists(db_path):
         print("[yellow]⚠️ Force flag set - removing existing database[/yellow]")
         os.remove(db_path)
+        db = sqlite_utils.Database(db_path)  # Reconnect to the new DB
     elif os.path.exists(db_path):
-        print(f"[yellow]⚠️ Embeddings database already exists at [cyan]{db_path}[/cyan]")
-        print("   Use [green]--force[/green] to recreate the database")
-        return
+        # Check if collection exists
+        try:
+            if collection in llm.collections.list(database=db_path):
+                print(f"[yellow]⚠️ Collection '{collection}' already exists in database")
+                print(
+                    "   Use [green]--force[/green] to recreate the collection[/yellow]"
+                )
+                return
+        except Exception as e:
+            print(f"[yellow]⚠️ Error checking collections: {e}[/yellow]")
+            print("   Continuing with database creation")
 
+    # Get file list
     file_list = file_utils.get_file_list(project_dir, include_pattern, exclude_pattern)
+
+    # Update should_process_file max size from parameter
+    file_utils.should_process_file.max_file_size_kb = size
 
     if not file_list:
         print("[yellow]⚠️ No suitable files found to process[/yellow]")
@@ -76,28 +110,19 @@ def create(
 
     print(f"[green]📊 Found [yellow]{len(file_list)}[/yellow] files to process[/green]")
 
-    # Process files and create embeddings
-    success_count = 0
-    fail_count = 0
-
-    # Async Embedding Process
-    async def embed_all_files(file_list):
-        results = []
-        for file in file_list:
-            try:
-                result = await embedding_utils.embed_file(
-                    file, model, db_path, collection
-                )
-                results.append(result)
-            except Exception as e:
-                print(f"[red]Error embedding file {file}: {e}[/red]")
-                results.append(False)
+    # Process files in batches using async
+    async def process_files():
+        results = await embedding_utils.embed_files_batch(
+            file_list, model, db_path, collection, batch
+        )
         return results
 
-    results = asyncio.run(embed_all_files(file_list))
+    # Run the async batch processing
+    results = asyncio.run(process_files())
 
-    success_count = results.count(True)
-    fail_count = results.count(False)
+    # Count successes and failures
+    success_count = results.count(True) if results else 0
+    fail_count = len(results) - success_count if results else 0
 
     print(
         f"\n[green]Processing complete! Successfully processed [yellow]{success_count}[/yellow] files, failed to process [yellow]{fail_count}[/yellow] files.[/green]"
