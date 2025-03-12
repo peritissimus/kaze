@@ -88,7 +88,7 @@ def create(
     elif os.path.exists(db_path):
         # Check if collection exists
         try:
-            if collection in llm.collections.list(database=db_path):
+            if collection in db_utils.list_collections(db):
                 print(f"[yellow]⚠️ Collection '{collection}' already exists in database")
                 print(
                     "   Use [green]--force[/green] to recreate the collection[/yellow]"

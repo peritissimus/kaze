@@ -58,24 +58,30 @@ def get_db_size(db_path):
     return f"{s} {size_name[i]}"
 
 
+def list_collections(db):
+    """List all collections in the database."""
+    try:
+        tables = [
+            t["name"]
+            for t in db.query("SELECT name FROM sqlite_master WHERE type='table'")
+        ]
+        if "collections" in tables:
+            rows = db.query("SELECT name FROM collections")
+            return [row["name"] for row in rows]
+        return []
+    except Exception as e:
+        print(f"[red]Error listing collections: {e}[/red]")
+        return []
+
+
 def show_collections(db_path):
     """Lists the collections in the database."""
     try:
         # Connect to the database
         db = sqlite_utils.Database(db_path)
 
-        # Get collections from the database
-        collections = []
-        try:
-            # First try the llm.collections.list method
-            collections = llm.collections.list(database=db_path)
-        except Exception:
-            # Fallback to direct DB query if the API doesn't work
-            try:
-                rows = db.query("SELECT name FROM collections")
-                collections = [row["name"] for row in rows]
-            except Exception as inner_e:
-                print(f"[red]Error querying collections table: {inner_e}[/red]")
+        # Get collections
+        collections = list_collections(db)
 
         if not collections:
             print("   [yellow]No collections found[/yellow]")

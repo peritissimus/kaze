@@ -73,7 +73,7 @@ def query(
     db = sqlite_utils.Database(db_path)
     collections = []
     try:
-        collections = llm.collections.list(database=db_path)
+        collections = db_utils.list_collections(db)
     except Exception as e:
         print(f"[yellow]Warning: Error listing collections: {e}[/yellow]")
         try:
