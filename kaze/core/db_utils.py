@@ -59,7 +59,7 @@ def get_db_size(db_path):
 
 
 def list_collections(db):
-    print("""List all collections in the database.""")
+    """List all collections in the database."""
     try:
         tables = [
             t["name"]
