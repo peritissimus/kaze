@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0] - 2025-03-13
+
+### Features
+
+- add new log output to info command (a3cb49d)
+- update changelog for version 0.4.0 release (84382b7)
+
 ## [0.4.0] - 2025-03-12
 
 ### Features

@@ -1,24 +1,18 @@
 [project]
 name = "kaze"
-version = "0.4.0"
+version = "0.5.0"
 description = "Unified tool for creating and querying embeddings."
-authors = [{ name = "peritissimus", email = "149.kush@gmail.com" }]
-dependencies = [
-    "llm",
-    "click",
-    "rich",  # For nicer terminal output
-    "tiktoken", # for token counting
-    "sqlite-utils", # for working with sqlite databases
-]
-
-[project.scripts]
-kaze = "kaze.cli:cli"
+dependencies = [ "llm", "click", "rich", "tiktoken", "sqlite-utils",]
+[[project.authors]]
+name = "peritissimus"
+email = "149.kush@gmail.com"
 
 [build-system]
-requires = ["setuptools>=42", "wheel"]
+requires = [ "setuptools>=42", "wheel",]
 build-backend = "setuptools.build_meta"
 
 [dependency-groups]
-dev = [
-    "toml>=0.10.2",
-]
+dev = [ "toml>=0.10.2",]
+
+[project.scripts]
+kaze = "kaze.cli:cli"
