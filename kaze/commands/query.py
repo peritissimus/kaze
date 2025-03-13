@@ -1,7 +1,6 @@
 import click
 import json
 
-import llm
 from kaze.core import db_utils
 from kaze.utils import display
 import os
@@ -29,6 +28,7 @@ import sqlite_utils
     "--human",
     "human_output",
     is_flag=True,
+    default=True,
     help="Display human-readable output instead of JSON.",
 )
 @click.option(
