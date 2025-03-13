@@ -32,5 +32,6 @@ def info(project_dir, output_dir):
         f"[blue]📏 Database Size: [yellow]{db_utils.get_db_size(db_path)}[/yellow][/blue]"
     )
     print("[blue]📚 Collections:[/blue]")
+    print("[blue]📚 New Log:[/blue]")
     db_utils.show_collections(db_path)
     print("-------------------------------------------")

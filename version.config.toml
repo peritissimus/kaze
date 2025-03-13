@@ -1,0 +1,16 @@
+pyproject_path = "pyproject.toml"
+changelog_path = "CHANGELOG.md"
+
+[commit_categories]
+feat = "Features"
+fix = "Bug Fixes"
+perf = "Performance Improvements"
+refactor = "Code Refactoring"
+docs = "Documentation"
+style = "Styles"
+test = "Tests"
+chore = "Chores"
+ci = "CI"
+build = "Build"
+revert = "Reverts"
+other = "Other"

@@ -17,3 +17,8 @@ kaze = "kaze.cli:cli"
 [build-system]
 requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[dependency-groups]
+dev = [
+    "toml>=0.10.2",
+]

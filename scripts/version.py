@@ -1,10 +1,11 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
 Script to automate versioning and changelog generation based on conventional commits.
 This script can be run to automatically update version numbers in pyproject.toml
 and generate a CHANGELOG.md file based on git commit history.
 """
 
+import argparse
 import os
 import re
 import subprocess
@@ -12,36 +13,78 @@ import sys
 from datetime import datetime
 from typing import List, Optional, Tuple
 
+import toml  # pip install toml
+
 
 class ConventionalVersioning:
-    def __init__(self, project_root: str):
+    def __init__(self, project_root: str, config_file: str = "version.config.toml"):
         self.project_root = project_root
-        self.pyproject_path = os.path.join(project_root, "pyproject.toml")
-        self.changelog_path = os.path.join(project_root, "CHANGELOG.md")
+        self.config_file = config_file
+        self.config = self.load_config()
+        self.pyproject_path = os.path.join(
+            project_root, self.config.get("pyproject_path", "pyproject.toml")
+        )
+        self.changelog_path = os.path.join(
+            project_root, self.config.get("changelog_path", "CHANGELOG.md")
+        )
+        self.commit_categories = self.config.get(
+            "commit_categories",
+            {
+                "feat": "Features",
+                "fix": "Bug Fixes",
+                "perf": "Performance Improvements",
+                "refactor": "Code Refactoring",
+                "docs": "Documentation",
+                "style": "Styles",
+                "test": "Tests",
+                "chore": "Chores",
+                "ci": "CI",
+                "build": "Build",
+                "revert": "Reverts",
+                "other": "Other",
+            },
+        )
+
+    def load_config(self):
+        try:
+            with open(self.config_file, "r") as f:
+                return toml.load(f)
+        except FileNotFoundError:
+            print(f"Warning: {self.config_file} not found, using defaults.")
+            return {}
 
     def get_current_version(self) -> str:
         """Extract the current version from pyproject.toml."""
-        with open(self.pyproject_path, "r") as f:
-            content = f.read()
-            match = re.search(r'version\s*=\s*"([^"]+)"', content)
-            if match:
-                return match.group(1)
-            else:
-                raise ValueError("Version not found in pyproject.toml")
+        try:
+            with open(self.pyproject_path, "r") as f:
+                data = toml.load(f)
+                return data["project"]["version"]
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                f"pyproject.toml not found at {self.pyproject_path}"
+            )
+        except KeyError:
+            raise ValueError("Version not found in pyproject.toml")
 
     def update_version(self, new_version: str) -> None:
         """Update the version in pyproject.toml."""
-        with open(self.pyproject_path, "r") as f:
-            content = f.read()
+        try:
+            with open(self.pyproject_path, "r") as f:
+                data = toml.load(f)
 
-        updated_content = re.sub(
-            r'(version\s*=\s*)"([^"]+)"', rf'\1"{new_version}"', content
-        )
+            data["project"]["version"] = new_version
 
-        with open(self.pyproject_path, "w") as f:
-            f.write(updated_content)
+            with open(self.pyproject_path, "w") as f:
+                toml.dump(data, f)
 
-        print(f"Updated version in pyproject.toml to {new_version}")
+            print(f"Updated version in pyproject.toml to {new_version}")
+
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                f"pyproject.toml not found at {self.pyproject_path}"
+            )
+        except Exception as e:
+            raise Exception(f"Error updating pyproject.toml: {e}")
 
     def get_commit_history(self, since_tag: Optional[str] = None) -> List[str]:
         """Get the git commit history since the given tag."""
@@ -49,25 +92,19 @@ class ConventionalVersioning:
         if since_tag:
             cmd.append(f"{since_tag}..HEAD")
 
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, cwd=self.project_root
+        )  # Important: set cwd
+        if result.returncode != 0:
+            print(f"Error running git log: {result.stderr}")
+            return []  # or raise an exception
+
         return result.stdout.strip().split("\n")
 
     def categorize_commits(self, commits: List[str]) -> dict:
         """Categorize commits based on conventional commit types."""
-        categories = {
-            "feat": [],
-            "fix": [],
-            "perf": [],
-            "refactor": [],
-            "docs": [],
-            "style": [],
-            "test": [],
-            "chore": [],
-            "ci": [],
-            "build": [],
-            "revert": [],
-            "other": [],
-        }
+        categories = {category: [] for category in self.commit_categories}
+        categories["other"] = []
 
         for commit in commits:
             if not commit:
@@ -129,28 +166,21 @@ class ConventionalVersioning:
         new_entry = f"## [{new_version}] - {today}\n\n"
 
         # Add categorized commits
-        category_titles = {
-            "feat": "### Features",
-            "fix": "### Bug Fixes",
-            "perf": "### Performance Improvements",
-            "refactor": "### Code Refactoring",
-            "docs": "### Documentation",
-            "style": "### Styles",
-            "test": "### Tests",
-            "chore": "### Chores",
-            "ci": "### CI",
-            "build": "### Build",
-            "revert": "### Reverts",
-        }
-
-        for category, title in category_titles.items():
+        for category, title in self.commit_categories.items():
             if categorized_commits[category]:
-                new_entry += f"{title}\n\n"
+                new_entry += f"### {title}\n\n"
                 for commit in categorized_commits[category]:
                     # Clean up the commit message for better readability
                     cleaned_commit = re.sub(r"^(\w+)(\([\w\-\.]+\))?!?:\s*", "", commit)
                     new_entry += f"- {cleaned_commit}\n"
                 new_entry += "\n"
+
+        if categorized_commits["other"]:
+            new_entry += "### Other\n\n"
+            for commit in categorized_commits["other"]:
+                cleaned_commit = re.sub(r"^(\w+)(\([\w\-\.]+\))?!?:\s*", "", commit)
+                new_entry += f"- {cleaned_commit}\n"
+            new_entry += "\n"
 
         # Insert the new entry after the header
         content_parts = content.split("\n\n", 1)
@@ -167,7 +197,10 @@ class ConventionalVersioning:
     def get_latest_tag(self) -> Optional[str]:
         """Get the latest tag from git."""
         result = subprocess.run(
-            ["git", "describe", "--tags", "--abbrev=0"], capture_output=True, text=True
+            ["git", "describe", "--tags", "--abbrev=0"],
+            capture_output=True,
+            text=True,
+            cwd=self.project_root,
         )
         if result.returncode == 0:
             return result.stdout.strip()
@@ -175,10 +208,15 @@ class ConventionalVersioning:
 
     def tag_version(self, version: str) -> None:
         """Create a git tag for the new version."""
-        subprocess.run(["git", "tag", f"v{version}"])
-        print(f"Created git tag v{version}")
+        try:
+            subprocess.run(
+                ["git", "tag", f"v{version}"], check=True, cwd=self.project_root
+            )
+            print(f"Created git tag v{version}")
+        except subprocess.CalledProcessError as e:
+            print(f"Error creating git tag: {e}")
 
-    def run(self, force_bump: Optional[str] = None) -> None:
+    def run(self, force_bump: Optional[str] = None, dry_run: bool = False) -> None:
         """Run the versioning process."""
         current_version = self.get_current_version()
         print(f"Current version: {current_version}")
@@ -203,21 +241,34 @@ class ConventionalVersioning:
         new_version = self.bump_version(current_version, bump_type)
         print(f"New version: {new_version}")
 
-        self.update_version(new_version)
-        self.update_changelog(new_version, categorized_commits)
-        self.tag_version(new_version)
+        if not dry_run:
+            self.update_version(new_version)
+            self.update_changelog(new_version, categorized_commits)
+            self.tag_version(new_version)
+        else:
+            print("Dry run: No changes will be written.")
 
         print("Versioning complete!")
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Automate versioning and changelog generation."
+    )
+    parser.add_argument(
+        "--force-bump",
+        choices=["major", "minor", "patch"],
+        help="Force a specific type of version bump.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Perform a dry run without modifying files or creating tags.",
+    )
+    args = parser.parse_args()
+
     # Get the project root directory (adjust as needed)
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-    force_bump = None
-    if len(sys.argv) > 1:
-        if sys.argv[1] in ["major", "minor", "patch"]:
-            force_bump = sys.argv[1]
-
     versioner = ConventionalVersioning(project_root)
-    versioner.run(force_bump)
+    versioner.run(args.force_bump, args.dry_run)
