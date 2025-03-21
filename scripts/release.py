@@ -193,21 +193,18 @@ def create_github_release(
             temp.write(release_notes)
             notes_file = temp.name
 
-        # Create the release
-        cmd = [
-            "gh",
-            "release",
-            "create",
-            tag,
-            "--title",
-            f"Release {tag}",
-            "--notes-file",
-            notes_file,
-        ]
+        # Create the release with artifacts in a single command
+        # Format: gh release create <tag> [<files>...] --notes-file <file> --title <title>
+        cmd = ["gh", "release", "create", tag]
 
-        # Add artifacts
+        # Add artifacts to the command
         for artifact in artifacts:
-            cmd.extend(["--attach", artifact])
+            cmd.append(artifact)
+
+        # Add release options
+        cmd.extend(["--notes-file", notes_file, "--title", f"Release {tag}"])
+
+        print(f"Running command: {' '.join(cmd)}")
 
         result = subprocess.run(
             cmd,
