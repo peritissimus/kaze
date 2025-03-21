@@ -9,9 +9,8 @@ import argparse
 import os
 import re
 import subprocess
-import sys
 from datetime import datetime
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import toml  # pip install toml
 
@@ -193,7 +192,7 @@ class ConventionalVersioning:
             f.write(updated_content)
 
         print(f"Updated CHANGELOG.md with version {new_version}")
-    
+
     def commit_changes(self, version: str) -> bool:
         """Commit the version and changelog changes to git."""
         try:
@@ -201,16 +200,16 @@ class ConventionalVersioning:
             subprocess.run(
                 ["git", "add", self.pyproject_path, self.changelog_path],
                 check=True,
-                cwd=self.project_root
+                cwd=self.project_root,
             )
-            
+
             # Commit with the conventional commit message
             subprocess.run(
                 ["git", "commit", "-m", f"chore: release {version} [skip ci]"],
                 check=True,
-                cwd=self.project_root
+                cwd=self.project_root,
             )
-            
+
             print(f"Committed changes for version {version}")
             return True
         except subprocess.CalledProcessError as e:
@@ -229,15 +228,47 @@ class ConventionalVersioning:
             return result.stdout.strip()
         return None
 
-    def tag_version(self, version: str) -> None:
+    def tag_version(self, version: str) -> bool:
         """Create a git tag for the new version."""
         try:
-            subprocess.run(
-                ["git", "tag", f"v{version}"], check=True, cwd=self.project_root
+            # Check if tag already exists
+            tag = f"v{version}"
+            check_tag = subprocess.run(
+                ["git", "tag", "-l", tag],
+                check=True,
+                cwd=self.project_root,
+                stdout=subprocess.PIPE,
+                text=True,
             )
-            print(f"Created git tag v{version}")
+
+            if tag in check_tag.stdout:
+                print(f"Warning: Tag {tag} already exists!")
+
+                # Ask if the tag should be deleted and recreated
+                confirm = input(
+                    f"Would you like to delete and recreate the tag {tag}? (y/N): "
+                )
+                if confirm.lower() != "y":
+                    print("Skipping tag creation")
+                    return False
+
+                # Delete the existing tag
+                subprocess.run(
+                    ["git", "tag", "-d", tag], check=True, cwd=self.project_root
+                )
+                print(f"Deleted existing tag {tag}")
+
+            # Create the tag
+            subprocess.run(
+                ["git", "tag", "-a", tag, "-m", f"Release {version}"],
+                check=True,
+                cwd=self.project_root,
+            )
+            print(f"Created annotated git tag {tag}")
+            return True
         except subprocess.CalledProcessError as e:
             print(f"Error creating git tag: {e}")
+            return False
 
     def run(self, force_bump: Optional[str] = None, dry_run: bool = False) -> None:
         """Run the versioning process."""
@@ -267,10 +298,12 @@ class ConventionalVersioning:
         if not dry_run:
             self.update_version(new_version)
             self.update_changelog(new_version, categorized_commits)
-            
+
             # Commit changes before tagging
             if self.commit_changes(new_version):
-                self.tag_version(new_version)
+                tag_created = self.tag_version(new_version)
+                if not tag_created:
+                    print("Skipping tag creation")
             else:
                 print("Skipping tag creation due to commit failure")
         else:

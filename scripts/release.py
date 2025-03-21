@@ -37,6 +37,77 @@ def check_requirements():
     return True
 
 
+def check_authorization() -> bool:
+    """
+    Check if the current user is authorized to create releases.
+    Returns True if authorized, False otherwise.
+    """
+    # List of authorized GitHub usernames
+    AUTHORIZED_USERS = ["peritissimus"]
+
+    try:
+        # Check Git username
+        git_user_result = subprocess.run(
+            ["git", "config", "user.name"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        if git_user_result.returncode != 0:
+            print("Error: Could not determine Git username.")
+            return False
+
+        git_username = git_user_result.stdout.strip()
+
+        # Check GitHub username
+        gh_user_result = subprocess.run(
+            ["gh", "api", "user"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        if gh_user_result.returncode != 0:
+            print(
+                "Error: Could not verify GitHub authentication. Make sure you're logged in with 'gh auth login'."
+            )
+            return False
+
+        import json
+
+        gh_user_data = json.loads(gh_user_result.stdout)
+        gh_username = gh_user_data.get("login")
+
+        if gh_username not in AUTHORIZED_USERS:
+            print(
+                f"Error: GitHub user '{gh_username}' is not authorized to create releases."
+            )
+            print(f"Authorized users: {', '.join(AUTHORIZED_USERS)}")
+            return False
+
+        # Optional: Check if commits are signed
+        signed_check = subprocess.run(
+            ["git", "log", "-1", "--show-signature"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        if "gpg: Signature made" not in signed_check.stdout:
+            print("Warning: Latest commit is not signed with a GPG key.")
+            # You could make this a hard requirement by returning False here
+
+        print(
+            f"Authorization check passed: User '{gh_username}' is authorized to create releases."
+        )
+        return True
+
+    except Exception as e:
+        print(f"Error checking authorization: {e}")
+        return False
+
+
 def run_versioning(
     project_root: str, force_bump: Optional[str] = None
 ) -> Optional[str]:
@@ -192,15 +263,52 @@ def push_changes(project_root: str, tag: str) -> bool:
     """Push changes and tags to the remote repository."""
     try:
         # Push the commit
-        subprocess.run(["git", "push"], cwd=project_root, check=True)
+        print("Pushing commits to remote...")
+        push_result = subprocess.run(
+            ["git", "push"],
+            cwd=project_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True,
+        )
+        print(f"Push result: {push_result.stdout}")
 
         # Push the tag
-        subprocess.run(["git", "push", "origin", tag], cwd=project_root, check=True)
+        print(f"Pushing tag {tag} to remote...")
+        tag_result = subprocess.run(
+            ["git", "push", "origin", tag],
+            cwd=project_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True,
+        )
+        print(f"Tag push result: {tag_result.stdout}")
+
+        # Verify the tag was pushed
+        verify_result = subprocess.run(
+            ["git", "ls-remote", "--tags", "origin", tag],
+            cwd=project_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        if tag in verify_result.stdout:
+            print(f"Verified tag {tag} exists on remote")
+        else:
+            print(f"Warning: Could not verify tag {tag} on remote")
+            print("Output:", verify_result.stdout)
+            print("Error:", verify_result.stderr)
 
         print("Successfully pushed changes and tags to remote")
         return True
     except subprocess.CalledProcessError as e:
         print(f"Error pushing changes: {e}")
+        print(
+            f"Standard error: {e.stderr if hasattr(e, 'stderr') else 'No stderr available'}"
+        )
         return False
 
 
@@ -231,6 +339,11 @@ def main():
 
     # Check required tools
     if not check_requirements():
+        sys.exit(1)
+
+    # Check authorization
+    if not check_authorization():
+        print("Error: You are not authorized to create releases.")
         sys.exit(1)
 
     # Run versioning
