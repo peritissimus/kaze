@@ -18,7 +18,7 @@ import toml  # pip install toml
 class ConventionalVersioning:
     def __init__(self, project_root: str, config_file: str = "version.config.toml"):
         self.project_root = project_root
-        self.config_file = config_file
+        self.config_path = os.path.join(project_root, config_file)
         self.config = self.load_config()
         self.pyproject_path = os.path.join(
             project_root, self.config.get("pyproject_path", "pyproject.toml")
@@ -45,11 +45,14 @@ class ConventionalVersioning:
         )
 
     def load_config(self):
+        """Load configuration from version.config.toml file."""
         try:
-            with open(self.config_file, "r") as f:
-                return toml.load(f)
+            with open(self.config_path, "r") as f:
+                config = toml.load(f)
+                print(f"Loaded configuration from {self.config_path}")
+                return config
         except FileNotFoundError:
-            print(f"Warning: {self.config_file} not found, using defaults.")
+            print(f"Warning: {self.config_path} not found, using defaults.")
             return {}
 
     def get_current_version(self) -> str:
@@ -161,22 +164,62 @@ class ConventionalVersioning:
         except FileNotFoundError:
             content = "# Changelog\n\nAll notable changes to this project will be documented in this file.\n\n"
 
+        # Check if this version entry already exists in the changelog
+        version_header = f"## [{new_version}]"
+        if version_header in content:
+            print(f"Version {new_version} already exists in changelog, updating it")
+            # Remove the existing entry for this version
+            start_idx = content.find(version_header)
+            next_header_idx = content.find("## [", start_idx + len(version_header))
+
+            if next_header_idx != -1:
+                # Remove until the next version header
+                content = content[:start_idx] + content[next_header_idx:]
+            else:
+                # This is the last entry, remove until the end
+                content = content[:start_idx]
+
+            # Ensure we have proper spacing after removing the entry
+            if not content.endswith("\n\n"):
+                content = content.rstrip("\n") + "\n\n"
+
         # Create the new changelog entry
-        new_entry = f"## [{new_version}] - {today}\n\n"
+        new_entry = f"{version_header} - {today}\n\n"
+
+        # Track which commits have been added to avoid duplicates
+        processed_commits = set()
 
         # Add categorized commits
         for category, title in self.commit_categories.items():
             if categorized_commits[category]:
                 new_entry += f"### {title}\n\n"
                 for commit in categorized_commits[category]:
+                    # Extract commit hash to use for deduplication
+                    commit_hash = commit.split("(")[-1].rstrip(")")
+
+                    # Skip if already processed
+                    if commit_hash in processed_commits:
+                        continue
+                    processed_commits.add(commit_hash)
+
                     # Clean up the commit message for better readability
                     cleaned_commit = re.sub(r"^(\w+)(\([\w\-\.]+\))?!?:\s*", "", commit)
                     new_entry += f"- {cleaned_commit}\n"
                 new_entry += "\n"
 
-        if categorized_commits["other"]:
+        # Process "other" category if there are any remaining commits
+        other_commits = [
+            c
+            for c in categorized_commits["other"]
+            if c.split("(")[-1].rstrip(")") not in processed_commits
+        ]
+
+        if other_commits:
             new_entry += "### Other\n\n"
-            for commit in categorized_commits["other"]:
+            for commit in other_commits:
+                commit_hash = commit.split("(")[-1].rstrip(")")
+                processed_commits.add(commit_hash)
+
                 cleaned_commit = re.sub(r"^(\w+)(\([\w\-\.]+\))?!?:\s*", "", commit)
                 new_entry += f"- {cleaned_commit}\n"
             new_entry += "\n"
