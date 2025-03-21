@@ -193,6 +193,29 @@ class ConventionalVersioning:
             f.write(updated_content)
 
         print(f"Updated CHANGELOG.md with version {new_version}")
+    
+    def commit_changes(self, version: str) -> bool:
+        """Commit the version and changelog changes to git."""
+        try:
+            # Stage the changed files
+            subprocess.run(
+                ["git", "add", self.pyproject_path, self.changelog_path],
+                check=True,
+                cwd=self.project_root
+            )
+            
+            # Commit with the conventional commit message
+            subprocess.run(
+                ["git", "commit", "-m", f"chore: release {version} [skip ci]"],
+                check=True,
+                cwd=self.project_root
+            )
+            
+            print(f"Committed changes for version {version}")
+            return True
+        except subprocess.CalledProcessError as e:
+            print(f"Error committing changes: {e}")
+            return False
 
     def get_latest_tag(self) -> Optional[str]:
         """Get the latest tag from git."""
@@ -244,7 +267,12 @@ class ConventionalVersioning:
         if not dry_run:
             self.update_version(new_version)
             self.update_changelog(new_version, categorized_commits)
-            self.tag_version(new_version)
+            
+            # Commit changes before tagging
+            if self.commit_changes(new_version):
+                self.tag_version(new_version)
+            else:
+                print("Skipping tag creation due to commit failure")
         else:
             print("Dry run: No changes will be written.")
 
