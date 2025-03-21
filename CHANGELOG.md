@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.8.1] - 2025-03-22
+
+### Other
+
+- fix(scripts/release.py): simplify release creation command (e0d3540)
+
+### Other
+
+- fix(scripts/release.py): simplify release creation command (e0d3540)
+
 ## [0.8.0] - 2025-03-22
 
 ### Features
