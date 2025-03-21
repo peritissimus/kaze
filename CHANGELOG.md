@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.0] - 2025-03-22
+
+### Features
+
+- add script for creating GitHub releases with versioning and build artifacts (e4c1de2)
+
+### Other
+
+- chore(changelog, pyproject): update changelog and bump version to 0.6.0 (7472b71)
+
+### Other
+
+- chore(changelog, pyproject): update changelog and bump version to 0.6.0 (7472b71)
+
 ## [0.6.0] - 2025-03-22
 
 ### Features

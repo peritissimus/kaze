@@ -1,6 +1,6 @@
 [project]
 name = "kaze"
-version = "0.6.0"
+version = "0.7.0"
 description = "Unified tool for creating and querying embeddings."
 dependencies = [ "llm", "click", "rich", "tiktoken", "sqlite-utils", "tree-sitter", "tree-sitter-languages",]
 [[project.authors]]
