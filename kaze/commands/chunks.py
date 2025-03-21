@@ -118,7 +118,9 @@ def create(
         print("[yellow]⚠️ No supported files found to process[/yellow]")
         return
 
-    print(f"[green]📊 Found [yellow]{len(supported_files)}[/yellow] supported files to process[/green]")
+    print(
+        f"[green]📊 Found [yellow]{len(supported_files)}[/yellow] supported files to process[/green]"
+    )
 
     # Process files in batches using async
     async def process_files():
@@ -147,7 +149,7 @@ def create(
         )
         print("[green]📚 Collections in database:[/green]")
         db_utils.show_collections(db_path)
-        
+
         # Show chunk statistics
         chunk_count = db_utils.get_chunk_count(db_path, collection)
         print(f"[green]🧩 Total chunks: [yellow]{chunk_count}[/yellow][/green]")
@@ -168,7 +170,9 @@ def create(
 )
 @click.option("-c", "--collection", default="chunks", help="Collection name.")
 @click.option("-f", "--file", "file_path", help="Filter chunks by file path.")
-@click.option("-t", "--type", "chunk_type", help="Filter chunks by type (class, function, etc.).")
+@click.option(
+    "-t", "--type", "chunk_type", help="Filter chunks by type (class, function, etc.)."
+)
 @click.option("--tree", is_flag=True, help="Display chunks as a tree.")
 def list(
     project_dir,
@@ -185,7 +189,9 @@ def list(
 
     if not os.path.exists(db_path):
         print(f"[red]Error: Embeddings database not found at [cyan]{db_path}[/cyan]")
-        print("Run [green]kaze chunks create[/green] first to generate chunk embeddings.")
+        print(
+            "Run [green]kaze chunks create[/green] first to generate chunk embeddings."
+        )
         return
 
     # Connect to the database
@@ -201,8 +207,7 @@ def list(
     try:
         # Query for chunks
         collection_id = db.query(
-            "SELECT id FROM collections WHERE name = ?",
-            [collection]
+            "SELECT id FROM collections WHERE name = ?", [collection]
         ).fetchone()["id"]
 
         query = "SELECT * FROM chunks WHERE collection_id = ?"
@@ -218,8 +223,9 @@ def list(
 
         # Execute the query
         import json
+
         chunk_rows = list(db.query(query, params))
-        
+
         # Convert to dictionaries
         chunks = []
         for row in chunk_rows:
@@ -264,7 +270,9 @@ def list(
     "-t", "--threshold", default=0.2, type=float, help="Similarity threshold (0.0-1.0)."
 )
 @click.option("-c", "--collection", default="chunks", help="Collection to search in.")
-@click.option("-y", "--type", "chunk_type", help="Filter by chunk type (class, function, etc.).")
+@click.option(
+    "-y", "--type", "chunk_type", help="Filter by chunk type (class, function, etc.)."
+)
 @click.option("--show-content", is_flag=True, help="Show chunk content in results.")
 @click.option(
     "--human",
@@ -294,7 +302,9 @@ def query(
             print(
                 f"[red]Error: Embeddings database not found at [cyan]{db_path}[/cyan]"
             )
-            print("Run [green]kaze chunks create[/green] first to generate chunk embeddings.")
+            print(
+                "Run [green]kaze chunks create[/green] first to generate chunk embeddings."
+            )
         else:
             print(json.dumps({"error": "Database not found", "path": db_path}))
         return
@@ -329,6 +339,7 @@ def query(
 
     # Get the results
     import json
+
     results = db_utils.query_chunks(
         db_path, collection, query_text, limit, threshold, chunk_type
     )
@@ -348,20 +359,24 @@ def query(
         for idx, chunk in enumerate(results, 1):
             score = chunk["score"]
             score_percent = round(score * 100, 1)
-            
+
             # Display chunk information
-            print(f"[{idx}] [cyan]{chunk['type']}[/cyan]:[yellow]{chunk['name']}[/yellow] "
-                  f"([yellow]{score_percent}%[/yellow] match)")
+            print(
+                f"[{idx}] [cyan]{chunk['type']}[/cyan]:[yellow]{chunk['name']}[/yellow] "
+                f"([yellow]{score_percent}%[/yellow] match)"
+            )
             print(f"    File: [blue]{chunk['path']}[/blue]")
-            print(f"    Lines: {chunk['start_line']}-{chunk['end_line']} "
-                  f"({chunk['end_line'] - chunk['start_line'] + 1} lines)")
-            
+            print(
+                f"    Lines: {chunk['start_line']}-{chunk['end_line']} "
+                f"({chunk['end_line'] - chunk['start_line'] + 1} lines)"
+            )
+
             if chunk.get("parent_id"):
                 print(f"    Parent: [green]{chunk['parent_id']}[/green]")
-            
+
             if show_content:
                 chunk_helpers.display_chunk(chunk)
-            
+
             print("-------------------------------------------")
 
         print(f"[green]🎉 Found {len(results)} matching chunks![/green]")
@@ -379,18 +394,10 @@ def query(
     help="Output directory (default: .kaze in project directory).",
 )
 @click.option("-c", "--collection", default="chunks", help="Collection name.")
-@click.option(
-    "-i", "--id", "chunk_id", required=True, help="ID of the chunk to show."
-)
-@click.option(
-    "--show-content", is_flag=True, default=True, help="Show chunk content."
-)
-@click.option(
-    "--show-children", is_flag=True, help="Show chunk's children."
-)
-@click.option(
-    "--show-ancestors", is_flag=True, help="Show chunk's ancestors."
-)
+@click.option("-i", "--id", "chunk_id", required=True, help="ID of the chunk to show.")
+@click.option("--show-content", is_flag=True, default=True, help="Show chunk content.")
+@click.option("--show-children", is_flag=True, help="Show chunk's children.")
+@click.option("--show-ancestors", is_flag=True, help="Show chunk's ancestors.")
 def show(
     project_dir,
     output_dir,
@@ -407,7 +414,9 @@ def show(
 
     if not os.path.exists(db_path):
         print(f"[red]Error: Embeddings database not found at [cyan]{db_path}[/cyan]")
-        print("Run [green]kaze chunks create[/green] first to generate chunk embeddings.")
+        print(
+            "Run [green]kaze chunks create[/green] first to generate chunk embeddings."
+        )
         return
 
     # Connect to the database
@@ -420,19 +429,21 @@ def show(
 
     # Get the collection ID
     collection_id = db.query(
-        "SELECT id FROM collections WHERE name = ?",
-        [collection]
+        "SELECT id FROM collections WHERE name = ?", [collection]
     ).fetchone()["id"]
 
     # Get the chunk
     import json
+
     chunk_row = db.query(
         "SELECT * FROM chunks WHERE id = ? AND collection_id = ?",
-        [chunk_id, collection_id]
+        [chunk_id, collection_id],
     ).fetchone()
 
     if not chunk_row:
-        print(f"[red]Error: Chunk with ID '{chunk_id}' not found in collection '{collection}'[/red]")
+        print(
+            f"[red]Error: Chunk with ID '{chunk_id}' not found in collection '{collection}'[/red]"
+        )
         return
 
     # Convert to dictionary
@@ -445,23 +456,22 @@ def show(
     # Show ancestors if requested
     if show_ancestors:
         print("[blue]🌳 Chunk Ancestors:[/blue]")
-        
+
         # Get all chunks to find ancestors
-        all_chunks = list(db.query(
-            "SELECT * FROM chunks WHERE collection_id = ?",
-            [collection_id]
-        ))
-        
+        all_chunks = list(
+            db.query("SELECT * FROM chunks WHERE collection_id = ?", [collection_id])
+        )
+
         # Convert to dictionaries
         all_chunk_dicts = []
         for row in all_chunks:
             chunk_dict = dict(row)
             chunk_dict["metadata"] = json.loads(chunk_dict["metadata"])
             all_chunk_dicts.append(chunk_dict)
-        
+
         # Find ancestors
         ancestors = chunk_helpers.get_chunk_ancestors(all_chunk_dicts, chunk_id)
-        
+
         if not ancestors:
             print("   [yellow]No ancestors found[/yellow]")
         else:
@@ -474,20 +484,22 @@ def show(
     # Show children if requested
     if show_children:
         print("[blue]🌱 Chunk Children:[/blue]")
-        
+
         # Get children directly from the database
-        children = list(db.query(
-            "SELECT * FROM chunks WHERE parent_id = ? AND collection_id = ?",
-            [chunk_id, collection_id]
-        ))
-        
+        children = list(
+            db.query(
+                "SELECT * FROM chunks WHERE parent_id = ? AND collection_id = ?",
+                [chunk_id, collection_id],
+            )
+        )
+
         # Convert to dictionaries
         child_chunks = []
         for row in children:
             child_dict = dict(row)
             child_dict["metadata"] = json.loads(child_dict["metadata"])
             child_chunks.append(child_dict)
-        
+
         if not child_chunks:
             print("   [yellow]No children found[/yellow]")
         else:
@@ -520,7 +532,9 @@ def stats(
 
     if not os.path.exists(db_path):
         print(f"[red]Error: Embeddings database not found at [cyan]{db_path}[/cyan]")
-        print("Run [green]kaze chunks create[/green] first to generate chunk embeddings.")
+        print(
+            "Run [green]kaze chunks create[/green] first to generate chunk embeddings."
+        )
         return
 
     # Connect to the database
@@ -536,36 +550,39 @@ def stats(
     try:
         # Get the collection ID
         collection_id = db.query(
-            "SELECT id FROM collections WHERE name = ?",
-            [collection]
+            "SELECT id FROM collections WHERE name = ?", [collection]
         ).fetchone()["id"]
 
         # Get total chunk count
         total_chunks = db.query(
             "SELECT COUNT(*) as count FROM chunks WHERE collection_id = ?",
-            [collection_id]
+            [collection_id],
         ).fetchone()["count"]
 
         print(f"[green]📈 Total Chunks: [yellow]{total_chunks}[/yellow]")
 
         # Count by type
         print("[green]📊 Chunks by Type:[/green]")
-        type_counts = list(db.query(
-            "SELECT type, COUNT(*) as count FROM chunks "
-            "WHERE collection_id = ? GROUP BY type ORDER BY count DESC",
-            [collection_id]
-        ))
+        type_counts = list(
+            db.query(
+                "SELECT type, COUNT(*) as count FROM chunks "
+                "WHERE collection_id = ? GROUP BY type ORDER BY count DESC",
+                [collection_id],
+            )
+        )
 
         for row in type_counts:
             print(f"   [cyan]{row['type']}[/cyan]: [yellow]{row['count']}[/yellow]")
 
         # Count by file (top 10)
         print("[green]📊 Files with Most Chunks (Top 10):[/green]")
-        file_counts = list(db.query(
-            "SELECT path, COUNT(*) as count FROM chunks "
-            "WHERE collection_id = ? GROUP BY path ORDER BY count DESC LIMIT 10",
-            [collection_id]
-        ))
+        file_counts = list(
+            db.query(
+                "SELECT path, COUNT(*) as count FROM chunks "
+                "WHERE collection_id = ? GROUP BY path ORDER BY count DESC LIMIT 10",
+                [collection_id],
+            )
+        )
 
         for row in file_counts:
             print(f"   [blue]{row['path']}[/blue]: [yellow]{row['count']}[/yellow]")
@@ -574,13 +591,13 @@ def stats(
         top_level_count = db.query(
             "SELECT COUNT(*) as count FROM chunks "
             "WHERE collection_id = ? AND parent_id IS NULL",
-            [collection_id]
+            [collection_id],
         ).fetchone()["count"]
-        
+
         nested_count = db.query(
             "SELECT COUNT(*) as count FROM chunks "
             "WHERE collection_id = ? AND parent_id IS NOT NULL",
-            [collection_id]
+            [collection_id],
         ).fetchone()["count"]
 
         print("[green]📊 Chunk Hierarchy:[/green]")
@@ -589,17 +606,19 @@ def stats(
 
         # Nesting depth stats
         print("[green]📊 Nesting Depth:[/green]")
-        
+
         # This requires recursive querying which is complex in SQLite
         # So we'll fetch all chunks and analyze in Python
-        all_chunks = list(db.query(
-            "SELECT id, parent_id FROM chunks WHERE collection_id = ?",
-            [collection_id]
-        ))
-        
+        all_chunks = list(
+            db.query(
+                "SELECT id, parent_id FROM chunks WHERE collection_id = ?",
+                [collection_id],
+            )
+        )
+
         # Build a lookup table to efficiently find parents
         chunk_by_id = {row["id"]: row for row in all_chunks}
-        
+
         # Calculate depths
         depths = {}
         for chunk in all_chunks:
@@ -608,11 +627,11 @@ def stats(
             while current.get("parent_id") and current["parent_id"] in chunk_by_id:
                 depth += 1
                 current = chunk_by_id[current["parent_id"]]
-            
+
             if depth not in depths:
                 depths[depth] = 0
             depths[depth] += 1
-        
+
         # Display depth statistics
         for depth in sorted(depths.keys()):
             level_name = "Root level" if depth == 0 else f"Level {depth}"

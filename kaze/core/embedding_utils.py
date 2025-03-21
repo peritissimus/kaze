@@ -144,6 +144,7 @@ async def embed_files_batch(files, model_name, db_path, collection_name, batch_s
 
 # NEW FUNCTIONS FOR CHUNKS
 
+
 async def embed_chunks(file_path, model_name, db_path, collection_name):
     """Extract and embed code chunks from a file"""
     try:
@@ -154,18 +155,18 @@ async def embed_chunks(file_path, model_name, db_path, collection_name):
 
         # Calculate the file ID (relative path)
         file_id = os.path.relpath(file_path, os.getcwd())
-        
+
         print(f"[blue]Extracting chunks from: {file_path}[/blue]")
-        
+
         # Extract chunks using Tree-sitter
         chunks = treesitter_utils.extract_chunks_from_file(file_path)
-        
+
         if not chunks:
             print(f"[yellow]⚠️ No chunks extracted from: {file_path}[/yellow]")
             return False
-        
+
         print(f"[green]✓ Extracted {len(chunks)} chunks from {file_path}[/green]")
-        
+
         # Get the embedding model
         embedding_model = llm.get_embedding_model(model_name)
 
@@ -174,21 +175,21 @@ async def embed_chunks(file_path, model_name, db_path, collection_name):
 
         # Get or create the collection
         collection = llm.Collection(collection_name, db, model=embedding_model)
-        
+
         # Embed each chunk
         successfully_embedded = []
         for chunk in chunks:
             try:
                 chunk_id = chunk["id"]
                 content = chunk["content"]
-                
+
                 # Skip empty chunks
                 if not content.strip():
                     continue
-                
+
                 # Get the number of tokens for cost estimations
                 num_tokens = num_tokens_from_string(content)
-                
+
                 # Add to metadata
                 chunk["metadata"] = {
                     "tokens": num_tokens,
@@ -200,26 +201,34 @@ async def embed_chunks(file_path, model_name, db_path, collection_name):
                     "parent_id": chunk.get("parent_id"),
                     "timestamp": asyncio.get_event_loop().time(),
                 }
-                
+
                 # Embed the chunk
                 print(f"[blue]Embedding chunk: {chunk_id}, tokens: {num_tokens}[/blue]")
-                collection.embed(chunk_id, content, metadata=chunk["metadata"], store=True)
-                
+                collection.embed(
+                    chunk_id, content, metadata=chunk["metadata"], store=True
+                )
+
                 successfully_embedded.append(chunk)
             except Exception as e:
-                print(f"[yellow]⚠️ Failed to embed chunk {chunk.get('id', 'unknown')}: {e}[/yellow]")
-        
+                print(
+                    f"[yellow]⚠️ Failed to embed chunk {chunk.get('id', 'unknown')}: {e}[/yellow]"
+                )
+
         # Store chunks in the chunks table
         if successfully_embedded:
             db_utils.store_chunks(db_path, collection_name, successfully_embedded)
-        
-        return len(successfully_embedded) > 0  # Success if at least one chunk was embedded
+
+        return (
+            len(successfully_embedded) > 0
+        )  # Success if at least one chunk was embedded
     except Exception as e:
         print(f"[yellow]⚠️ Failed to process chunks from {file_path}: {e}[/yellow]")
         return False
 
 
-async def embed_chunks_batch(files, model_name, db_path, collection_name, batch_size=20):
+async def embed_chunks_batch(
+    files, model_name, db_path, collection_name, batch_size=20
+):
     """Extract and embed code chunks from multiple files in batches"""
     try:
         if not files:
@@ -228,9 +237,11 @@ async def embed_chunks_batch(files, model_name, db_path, collection_name, batch_
         results = []
         for file_path in files:
             # Process chunks for each file individually
-            success = await embed_chunks(file_path, model_name, db_path, collection_name)
+            success = await embed_chunks(
+                file_path, model_name, db_path, collection_name
+            )
             results.append(success)
-            
+
             # Small pause to avoid overwhelming the system
             await asyncio.sleep(0.1)
 

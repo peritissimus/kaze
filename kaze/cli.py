@@ -1,7 +1,6 @@
 import click
 from kaze.commands import create, query, info
 from kaze.commands import chunks
-from kaze.utils import config
 
 
 @click.group()
