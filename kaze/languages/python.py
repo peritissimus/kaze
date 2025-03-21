@@ -1,13 +1,21 @@
 """
-Python language parser for Tree-sitter.
+Python language parser for code chunk extraction.
 Implements Python-specific parsing rules for extracting code chunks.
 """
 
-from typing import Dict, List, Any, Optional
-from tree_sitter import Node
+from typing import Dict, List, Any, Tuple
+import re
+import logging
 
-from kaze.languages.base import BaseLanguageParser
+from kaze.languages.base import BaseLanguageParser, TREE_SITTER_AVAILABLE
 from kaze.languages import register_language
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+# Import tree-sitter types conditionally
+if TREE_SITTER_AVAILABLE:
+    pass
 
 
 class PythonParser(BaseLanguageParser):
@@ -15,98 +23,210 @@ class PythonParser(BaseLanguageParser):
 
     LANGUAGE_ID = "python"
     FILE_EXTENSIONS = [".py"]
-    GRAMMAR_REPO = "https://github.com/tree-sitter/tree-sitter-python"
 
-    def _get_language(self):
-        """Get the Tree-sitter Language object for Python."""
-        # Implementation would depend on how you've set up Tree-sitter
-        # For now, return None as a placeholder
-        return None
+    # Regular expressions for Python code chunks
+    CLASS_PATTERN = r"(?:@\w+(?:\(.*?\))?\s*\n)*class\s+(\w+)(?:\s*\(\s*.*?\s*\))?\s*:"
+    FUNCTION_PATTERN = (
+        r"(?:@\w+(?:\(.*?\))?\s*\n)*def\s+(\w+)\s*\(.*?\)\s*(?:->.*?)?\s*:"
+    )
+    DECORATOR_PATTERN = r"@(\w+)(?:\(.*?\))?"
 
-    def extract_chunks(self, source_code: str, file_path: str) -> List[Dict[str, Any]]:
-        """Extract code chunks from Python source code."""
+    # Indentation utils
+    @staticmethod
+    def get_indentation(line: str) -> int:
+        """Get the indentation level of a line."""
+        return len(line) - len(line.lstrip())
+
+    @staticmethod
+    def get_line_indent(source_code: str, line_number: int) -> int:
+        """Get the indentation of a specific line."""
+        lines = source_code.splitlines()
+        if 0 <= line_number < len(lines):
+            return PythonParser.get_indentation(lines[line_number])
+        return 0
+
+    def _extract_chunk_content(
+        self, source_code: str, start_line: int
+    ) -> Tuple[str, int]:
+        """
+        Extract a chunk's content based on indentation.
+
+        Args:
+            source_code: The source code
+            start_line: The line number where the chunk starts
+
+        Returns:
+            Tuple of (chunk content, end line number)
+        """
+        lines = source_code.splitlines()
+        if start_line >= len(lines):
+            return "", start_line
+
+        # Get the indentation of the chunk definition
+        definition_indent = self.get_indentation(lines[start_line])
+
+        # Start with the definition line
+        chunk_lines = [lines[start_line]]
+        end_line = start_line
+
+        # Find the first non-empty line after the definition to get the chunk's indentation
+        chunk_indent = None
+        for i in range(start_line + 1, len(lines)):
+            if lines[i].strip():  # Non-empty line
+                current_indent = self.get_indentation(lines[i])
+                if current_indent <= definition_indent:
+                    # This line has less indentation than the definition, so it's outside the chunk
+                    break
+                if chunk_indent is None:
+                    chunk_indent = current_indent
+                chunk_lines.append(lines[i])
+                end_line = i
+            else:
+                # Include blank lines
+                chunk_lines.append(lines[i])
+                end_line = i
+
+        return "\n".join(chunk_lines), end_line
+
+    def _get_decorators_from_lines(
+        self, source_code: str, start_line: int
+    ) -> List[str]:
+        """Extract decorators from lines preceding a chunk."""
+        lines = source_code.splitlines()
+        decorators = []
+
+        # Look at lines before the class/function definition
+        line_idx = start_line - 1
+        while line_idx >= 0:
+            line = lines[line_idx].strip()
+            if line.startswith("@"):
+                decorators.insert(0, line)
+                line_idx -= 1
+            else:
+                # Stop when we hit a non-decorator line
+                break
+
+        return decorators
+
+    def _extract_chunks_regex(
+        self, source_code: str, file_path: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract code chunks using regex patterns.
+
+        Args:
+            source_code: The source code to parse
+            file_path: Path to the source file
+
+        Returns:
+            List of chunk dictionaries with metadata
+        """
         chunks = []
+        lines = source_code.splitlines()
 
-        # Parse the source code
-        tree = self.parser.parse(bytes(source_code, "utf8"))
+        # Keep track of classes to determine if functions are methods
+        class_stack = []
 
-        # Process the syntax tree to extract chunks
-        self._process_node(
-            tree.root_node, source_code, file_path, chunks, parent_id=None
-        )
+        # First pass: identify all classes and functions
+        for i, line in enumerate(lines):
+            # Check for class definitions
+            class_match = re.search(self.CLASS_PATTERN, line)
+            if class_match:
+                class_name = class_match.group(1)
+                content, end_line = self._extract_chunk_content(source_code, i)
+                decorators = self._get_decorators_from_lines(source_code, i)
+
+                # Add indentation level to track nesting
+                indent_level = self.get_indentation(line)
+
+                # Remove any classes from the stack that have less indentation
+                while class_stack and class_stack[-1]["indent"] >= indent_level:
+                    class_stack.pop()
+
+                # Create the chunk
+                parent_id = class_stack[-1]["id"] if class_stack else None
+
+                chunk_id = self._generate_chunk_id(file_path, "class", class_name, i)
+
+                chunk = {
+                    "id": chunk_id,
+                    "type": "class",
+                    "name": class_name,
+                    "path": file_path,
+                    "start_line": i + 1,  # 1-based line numbers
+                    "start_col": 0,  # Regex doesn't give precise column info
+                    "end_line": end_line + 1,
+                    "end_col": len(lines[end_line]) if end_line < len(lines) else 0,
+                    "parent_id": parent_id,
+                    "content": content,
+                    "decorators": decorators,
+                }
+
+                chunks.append(chunk)
+
+                # Add to class stack
+                class_stack.append(
+                    {"id": chunk_id, "name": class_name, "indent": indent_level}
+                )
+
+            # Check for function definitions
+            function_match = re.search(self.FUNCTION_PATTERN, line)
+            if function_match:
+                function_name = function_match.group(1)
+                content, end_line = self._extract_chunk_content(source_code, i)
+                decorators = self._get_decorators_from_lines(source_code, i)
+
+                # Determine if this is a method
+                indent_level = self.get_indentation(line)
+                parent_id = None
+                chunk_type = "function"
+
+                # Check if this function is inside a class (making it a method)
+                for class_info in reversed(class_stack):
+                    if class_info["indent"] < indent_level:
+                        parent_id = class_info["id"]
+                        chunk_type = "method"
+                        break
+
+                chunk = {
+                    "id": self._generate_chunk_id(
+                        file_path, chunk_type, function_name, i
+                    ),
+                    "type": chunk_type,
+                    "name": function_name,
+                    "path": file_path,
+                    "start_line": i + 1,  # 1-based line numbers
+                    "start_col": 0,  # Regex doesn't give precise column info
+                    "end_line": end_line + 1,
+                    "end_col": len(lines[end_line]) if end_line < len(lines) else 0,
+                    "parent_id": parent_id,
+                    "content": content,
+                    "decorators": decorators,
+                }
+
+                chunks.append(chunk)
 
         return chunks
 
-    def _process_node(
-        self,
-        node: Node,
-        source_code: str,
-        file_path: str,
-        chunks: List[Dict[str, Any]],
-        parent_id: Optional[str] = None,
-    ):
-        """Process a node in the syntax tree to extract chunks."""
-        # Check if the node is a class or function definition
-        if node.type == "class_definition" or node.type == "function_definition":
-            # Extract node metadata
-            node_type = self.get_node_type(node)
-            node_name = self.get_node_name(node, source_code)
+    def _extract_chunks_tree_sitter(
+        self, source_code: str, file_path: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Extract code chunks using tree-sitter.
 
-            # Calculate start and end positions
-            start_point = node.start_point
-            end_point = node.end_point
+        This is only used when tree-sitter is available and properly configured.
 
-            # Extract the chunk text
-            chunk_text = source_code[node.start_byte : node.end_byte]
+        Args:
+            source_code: The source code to parse
+            file_path: Path to the source file
 
-            # Create a unique ID for the chunk
-            chunk_id = f"{file_path}:{node_type}:{node_name}:{start_point[0]}"
-
-            # Create the chunk dictionary
-            chunk = {
-                "id": chunk_id,
-                "type": node_type,
-                "name": node_name,
-                "path": file_path,
-                "start_line": start_point[0] + 1,  # 1-based line numbers
-                "start_col": start_point[1],
-                "end_line": end_point[0] + 1,
-                "end_col": end_point[1],
-                "parent_id": parent_id,
-                "content": chunk_text,
-            }
-
-            # Add the chunk to the list
-            chunks.append(chunk)
-
-            # Process children with this node as the parent
-            for child in node.children:
-                self._process_node(
-                    child, source_code, file_path, chunks, parent_id=chunk_id
-                )
-        else:
-            # Process all children
-            for child in node.children:
-                self._process_node(
-                    child, source_code, file_path, chunks, parent_id=parent_id
-                )
-
-    def get_node_type(self, node: Node) -> str:
-        """Get the type of a Tree-sitter node for Python."""
-        if node.type == "class_definition":
-            return "class"
-        elif node.type == "function_definition":
-            # Check if this is a method (inside a class)
-            # This would require more context about the parent node
-            return "function"
-        return node.type
-
-    def get_node_name(self, node: Node, source_code: str) -> str:
-        """Get the name of a Tree-sitter node for Python."""
-        for child in node.children:
-            if child.type == "identifier":
-                return source_code[child.start_byte : child.end_byte]
-        return "unnamed"
+        Returns:
+            List of chunk dictionaries with metadata
+        """
+        logger.warning(
+            "Tree-sitter support is not fully implemented. Using regex fallback."
+        )
+        return self._extract_chunks_regex(source_code, file_path)
 
 
 # Register the Python parser

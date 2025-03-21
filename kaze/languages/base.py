@@ -5,8 +5,22 @@ Defines the common interface that all language parsers must implement.
 
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any
-from tree_sitter import Language, Parser, Node
 import os
+import logging
+
+# Configure logging
+logger = logging.getLogger(__name__)
+
+# Import tree-sitter conditionally to handle environments where it's not available
+try:
+    from tree_sitter import Parser, Node
+
+    TREE_SITTER_AVAILABLE = True
+except ImportError:
+    TREE_SITTER_AVAILABLE = False
+    logger.warning(
+        "tree-sitter package not available. Falling back to regex-based parsing."
+    )
 
 
 class BaseLanguageParser(ABC):
@@ -18,29 +32,19 @@ class BaseLanguageParser(ABC):
     # File extensions that this parser can handle
     FILE_EXTENSIONS = []
 
-    # Tree-sitter grammar repository URL
-    GRAMMAR_REPO = ""
-
     def __init__(self):
         """Initialize the language parser."""
         self.parser = None
-        self.language = None
-        self._initialize_parser()
 
-    def _initialize_parser(self):
-        """Initialize the Tree-sitter parser for this language."""
-        # This would be implemented based on Tree-sitter's requirements
-        # For now, this is a placeholder
-        self.parser = Parser()
-        # self.language = self._get_language()
-        # self.parser.set_language(self.language)
+        # Initialize tree-sitter parser if available
+        if TREE_SITTER_AVAILABLE:
+            try:
+                self.parser = Parser()
+                logger.info(f"Initialized tree-sitter parser for {self.LANGUAGE_ID}")
+            except Exception as e:
+                logger.error(f"Error initializing tree-sitter parser: {e}")
+                self.parser = None
 
-    @abstractmethod
-    def _get_language(self) -> Language:
-        """Get the Tree-sitter Language object for this language."""
-        pass
-
-    @abstractmethod
     def extract_chunks(self, source_code: str, file_path: str) -> List[Dict[str, Any]]:
         """
         Extract code chunks from source code.
@@ -52,32 +56,45 @@ class BaseLanguageParser(ABC):
         Returns:
             List of chunk dictionaries with metadata
         """
-        pass
+        # Try tree-sitter parsing first if available
+        if TREE_SITTER_AVAILABLE and self.parser is not None:
+            try:
+                return self._extract_chunks_tree_sitter(source_code, file_path)
+            except Exception as e:
+                logger.warning(
+                    f"Tree-sitter parsing failed, falling back to regex: {e}"
+                )
+
+        # Fall back to regex-based parsing
+        return self._extract_chunks_regex(source_code, file_path)
+
+    def _extract_chunks_tree_sitter(
+        self, source_code: str, file_path: str
+    ) -> List[Dict[str, Any]]:
+        """Extract chunks using tree-sitter if available."""
+        # This is just a stub that should be overridden by specific implementations
+        # that have proper tree-sitter language support
+        logger.warning(
+            f"Tree-sitter extraction not implemented for {self.LANGUAGE_ID}, using regex fallback"
+        )
+        return self._extract_chunks_regex(source_code, file_path)
 
     @abstractmethod
-    def get_node_type(self, node: Node) -> str:
+    def _extract_chunks_regex(
+        self, source_code: str, file_path: str
+    ) -> List[Dict[str, Any]]:
         """
-        Get the type of a Tree-sitter node.
+        Extract code chunks using regex patterns as a fallback.
+
+        This method should be implemented by each language parser to provide
+        basic chunk extraction even without tree-sitter.
 
         Args:
-            node: The Tree-sitter node
+            source_code: The source code to parse
+            file_path: Path to the source file
 
         Returns:
-            Node type string (e.g., 'function', 'class', 'method')
-        """
-        pass
-
-    @abstractmethod
-    def get_node_name(self, node: Node, source_code: str) -> str:
-        """
-        Get the name of a Tree-sitter node.
-
-        Args:
-            node: The Tree-sitter node
-            source_code: The source code
-
-        Returns:
-            Node name string
+            List of chunk dictionaries with metadata
         """
         pass
 
@@ -94,3 +111,9 @@ class BaseLanguageParser(ABC):
         """
         _, ext = os.path.splitext(file_path)
         return ext.lower() in cls.FILE_EXTENSIONS
+
+    def _generate_chunk_id(
+        self, file_path: str, chunk_type: str, name: str, line_number: int
+    ) -> str:
+        """Generate a consistent ID for a chunk."""
+        return f"{file_path}:{chunk_type}:{name}:{line_number}"

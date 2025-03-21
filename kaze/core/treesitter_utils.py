@@ -7,6 +7,17 @@ extracting hierarchical code chunks based on language syntax.
 from typing import Dict, List, Optional, Any
 from rich import print
 
+# Import tree-sitter conditionally to handle environments where it's not available
+try:
+    from tree_sitter import Language, Parser
+
+    TREE_SITTER_AVAILABLE = True
+except ImportError:
+    TREE_SITTER_AVAILABLE = False
+    print(
+        "[yellow]⚠️ tree-sitter package not available. Falling back to regex-based parsing.[/yellow]"
+    )
+
 from kaze.languages import get_language_parser, get_supported_languages
 
 

@@ -37,10 +37,10 @@ def query_embeddings(db_path, collection_name, query_text, limit, threshold):
 
         return serializable_results
     except sqlite3.OperationalError as e:
-        print(f"[red]Database error: {e}[/red]")
+        print(f"[red]Database error: {str(e)}[/red]")
         return []
     except Exception as e:
-        print(f"[red]Error querying embeddings: {e}[/red]")
+        print(f"[red]Error querying embeddings: {str(e)}[/red]")
         return []
 
 
@@ -71,7 +71,7 @@ def list_collections(db):
             return [row["name"] for row in rows]
         return []
     except Exception as e:
-        print(f"[red]Error listing collections: {e}[/red]")
+        print(f"[red]Error listing collections: {str(e)}[/red]")
         return []
 
 
@@ -97,10 +97,10 @@ def show_collections(db_path):
                     )
                 except Exception as e:
                     print(
-                        f"   - [cyan]{collection}[/cyan]: [red]Error getting count: {e}[/red]"
+                        f"   - [cyan]{collection}[/cyan]: [red]Error getting count: {str(e)}[/red]"
                     )
     except Exception as e:
-        print(f"[red]Error listing collections: {e}[/red]")
+        print(f"[red]Error listing collections: {str(e)}[/red]")
 
 
 def get_collection_count(db_path, collection_name):
@@ -117,7 +117,7 @@ def get_collection_count(db_path, collection_name):
         collection = llm.Collection(collection_name, db)
         return collection.count()
     except Exception as e:
-        print(f"[red]Error getting collection count: {e}[/red]")
+        print(f"[red]Error getting collection count: {str(e)}[/red]")
         return 0
 
 
@@ -135,7 +135,7 @@ def get_collection_model(db_path, collection_name):
         collection = llm.Collection(collection_name, db)
         return collection.model_id
     except Exception as e:
-        print(f"[red]Error getting collection model: {e}[/red]")
+        print(f"[red]Error getting collection model: {str(e)}[/red]")
         return None
 
 
@@ -153,40 +153,36 @@ def setup_chunk_tables(db_path):
         db = sqlite_utils.Database(db_path)
 
         # Create the chunks table if it doesn't exist
-        db["chunks"].create(
-            {
-                "id": str,
-                "collection_id": int,
-                "type": str,
-                "name": str,
-                "path": str,
-                "start_line": int,
-                "start_col": int,
-                "end_line": int,
-                "end_col": int,
-                "parent_id": str,
-                "content": str,
-                "metadata": str,  # JSON
-                "updated": int,  # Timestamp
-            },
-            pk="id",
-            if_not_exists=True,
-            foreign_keys=[("collection_id", "collections", "id")],
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chunks (
+                id TEXT PRIMARY KEY,
+                collection_id INTEGER,
+                type TEXT,
+                name TEXT,
+                path TEXT,
+                start_line INTEGER,
+                start_col INTEGER,
+                end_line INTEGER,
+                end_col INTEGER,
+                parent_id TEXT,
+                content TEXT,
+                metadata TEXT,
+                updated INTEGER,
+                FOREIGN KEY (collection_id) REFERENCES collections(id)
+            )
+            """
         )
 
-        # Create an index on the parent_id column
-        db["chunks"].create_index(["parent_id"], if_not_exists=True)
-
-        # Create an index on the path column
-        db["chunks"].create_index(["path"], if_not_exists=True)
-
-        # Create an index on the type column
-        db["chunks"].create_index(["type"], if_not_exists=True)
+        # Create indexes
+        db.execute("CREATE INDEX IF NOT EXISTS chunks_parent_id ON chunks(parent_id)")
+        db.execute("CREATE INDEX IF NOT EXISTS chunks_path ON chunks(path)")
+        db.execute("CREATE INDEX IF NOT EXISTS chunks_type ON chunks(type)")
 
         print(f"[green]✓ Set up chunk tables in {db_path}[/green]")
         return True
     except Exception as e:
-        print(f"[red]❌ Error setting up chunk tables: {e}[/red]")
+        print(f"[red]❌ Error setting up chunk tables: {str(e)}[/red]")
         return False
 
 
@@ -204,9 +200,14 @@ def store_chunks(db_path, collection_name, chunks):
             return False
 
         # Get the collection ID
-        collection_id = db.query(
-            "SELECT id FROM collections WHERE name = ?", [collection_name]
-        ).fetchone()["id"]
+        collection_rows = list(
+            db.query("SELECT id FROM collections WHERE name = ?", [collection_name])
+        )
+        if not collection_rows:
+            print(f"[red]Collection '{collection_name}' not found in database[/red]")
+            return False
+
+        collection_id = collection_rows[0]["id"]
 
         # Set up the chunk tables
         setup_chunk_tables(db_path)
@@ -217,37 +218,38 @@ def store_chunks(db_path, collection_name, chunks):
 
         now = int(time.time())
 
-        chunk_rows = []
+        # Insert chunks one by one (not the most efficient, but most compatible)
         for chunk in chunks:
-            chunk_row = {
-                "id": chunk["id"],
-                "collection_id": collection_id,
-                "type": chunk["type"],
-                "name": chunk["name"],
-                "path": chunk["path"],
-                "start_line": chunk["start_line"],
-                "start_col": chunk["start_col"],
-                "end_line": chunk["end_line"],
-                "end_col": chunk["end_col"],
-                "parent_id": chunk.get("parent_id"),
-                "content": chunk["content"],
-                "metadata": json.dumps(chunk.get("metadata", {})),
-                "updated": now,
-            }
-            chunk_rows.append(chunk_row)
-
-        # Insert chunks in batches
-        batch_size = 100
-        for i in range(0, len(chunk_rows), batch_size):
-            batch = chunk_rows[i : i + batch_size]
-            db["chunks"].upsert_all(batch, pk="id", alter=True)
+            db.execute(
+                """
+                INSERT OR REPLACE INTO chunks 
+                (id, collection_id, type, name, path, start_line, start_col, 
+                end_line, end_col, parent_id, content, metadata, updated)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    chunk["id"],
+                    collection_id,
+                    chunk["type"],
+                    chunk["name"],
+                    chunk["path"],
+                    chunk["start_line"],
+                    chunk["start_col"],
+                    chunk["end_line"],
+                    chunk["end_col"],
+                    chunk.get("parent_id"),
+                    chunk["content"],
+                    json.dumps(chunk.get("metadata", {})),
+                    now,
+                ],
+            )
 
         print(
             f"[green]✓ Stored {len(chunks)} chunks in collection '{collection_name}'[/green]"
         )
         return True
     except Exception as e:
-        print(f"[red]❌ Error storing chunks: {e}[/red]")
+        print(f"[red]❌ Error storing chunks: {str(e)}[/red]")
         return False
 
 
@@ -289,13 +291,17 @@ def query_chunks(
 
             # Get the chunk from the chunks table
             try:
-                chunk_row = db.query(
-                    "SELECT * FROM chunks WHERE id = ? AND collection_id = (SELECT id FROM collections WHERE name = ?)",
-                    [entry.id, collection_name],
-                ).fetchone()
+                chunk_rows = list(
+                    db.query(
+                        "SELECT * FROM chunks WHERE id = ? AND collection_id = (SELECT id FROM collections WHERE name = ?)",
+                        [entry.id, collection_name],
+                    )
+                )
 
-                if not chunk_row:
+                if not chunk_rows:
                     continue
+
+                chunk_row = chunk_rows[0]
 
                 # Apply filters
                 if chunk_type and chunk_row["type"] != chunk_type:
@@ -318,15 +324,15 @@ def query_chunks(
                     break
             except Exception as inner_e:
                 print(
-                    f"[yellow]⚠️ Error processing chunk {entry.id}: {inner_e}[/yellow]"
+                    f"[yellow]⚠️ Error processing chunk {entry.id}: {str(inner_e)}[/yellow]"
                 )
 
         return serializable_results
     except sqlite3.OperationalError as e:
-        print(f"[red]Database error: {e}[/red]")
+        print(f"[red]Database error: {str(e)}[/red]")
         return []
     except Exception as e:
-        print(f"[red]Error querying chunks: {e}[/red]")
+        print(f"[red]Error querying chunks: {str(e)}[/red]")
         return []
 
 
@@ -344,9 +350,14 @@ def get_chunks_by_path(db_path, collection_name, file_path):
             return []
 
         # Get the collection ID
-        collection_id = db.query(
-            "SELECT id FROM collections WHERE name = ?", [collection_name]
-        ).fetchone()["id"]
+        collection_rows = list(
+            db.query("SELECT id FROM collections WHERE name = ?", [collection_name])
+        )
+        if not collection_rows:
+            print(f"[red]Collection '{collection_name}' not found in database[/red]")
+            return []
+
+        collection_id = collection_rows[0]["id"]
 
         # Query for chunks by path
         import json
@@ -367,7 +378,7 @@ def get_chunks_by_path(db_path, collection_name, file_path):
 
         return chunks
     except Exception as e:
-        print(f"[red]Error getting chunks by path: {e}[/red]")
+        print(f"[red]Error getting chunks by path: {str(e)}[/red]")
         return []
 
 
@@ -385,17 +396,26 @@ def get_chunk_count(db_path, collection_name):
             return 0
 
         # Get the collection ID
-        collection_id = db.query(
-            "SELECT id FROM collections WHERE name = ?", [collection_name]
-        ).fetchone()["id"]
+        collection_rows = list(
+            db.query("SELECT id FROM collections WHERE name = ?", [collection_name])
+        )
+        if not collection_rows:
+            print(f"[red]Collection '{collection_name}' not found in database[/red]")
+            return 0
+
+        collection_id = collection_rows[0]["id"]
 
         # Count chunks
-        count = db.query(
-            "SELECT COUNT(*) as count FROM chunks WHERE collection_id = ?",
-            [collection_id],
-        ).fetchone()["count"]
+        count_rows = list(
+            db.query(
+                "SELECT COUNT(*) as count FROM chunks WHERE collection_id = ?",
+                [collection_id],
+            )
+        )
+
+        count = count_rows[0]["count"] if count_rows else 0
 
         return count
     except Exception as e:
-        print(f"[red]Error getting chunk count: {e}[/red]")
+        print(f"[red]Error getting chunk count: {str(e)}[/red]")
         return 0

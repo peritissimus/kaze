@@ -4,6 +4,7 @@ import sqlite_utils
 from rich import print
 import tiktoken
 import asyncio
+import sqlite3
 
 from kaze.core import treesitter_utils, db_utils
 
@@ -32,8 +33,13 @@ async def embed_file(file_path, model_name, db_path, collection_name):
         # Get the embedding model
         embedding_model = llm.get_embedding_model(model_name)
 
-        # Connect to the database
+        # Connect to the database with increased timeout
         db = sqlite_utils.Database(db_path)
+
+        # Configure SQLite for better concurrency handling
+        db.execute("PRAGMA journal_mode=DELETE")
+        db.execute("PRAGMA synchronous=NORMAL")
+        db.execute("PRAGMA busy_timeout=5000")
 
         # Get or create the collection
         collection = llm.Collection(collection_name, db, model=embedding_model)
@@ -45,15 +51,30 @@ async def embed_file(file_path, model_name, db_path, collection_name):
             "timestamp": asyncio.get_event_loop().time(),
         }
 
-        collection.embed(file_id, content, metadata=metadata, store=True)
+        max_retries = 3
+        retry_delay = 2
 
-        return True  # Success
+        for retry in range(max_retries):
+            try:
+                collection.embed(file_id, content, metadata=metadata, store=True)
+                return True  # Success
+            except sqlite3.OperationalError as e:
+                if "database is locked" in str(e) and retry < max_retries - 1:
+                    print(
+                        f"[yellow]⚠️ Database locked, retrying in {retry_delay}s (attempt {retry+1}/{max_retries})[/yellow]"
+                    )
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    raise
+
+        return False  # All retries failed
     except Exception as e:
-        print(f"[yellow]⚠️ Failed to embed {file_path}: {e}[/yellow]")
+        print(f"[yellow]⚠️ Failed to embed {file_path}: {str(e)}[/yellow]")
         return False  # Failure
 
 
-async def embed_files_batch(files, model_name, db_path, collection_name, batch_size=20):
+async def embed_files_batch(files, model_name, db_path, collection_name, batch_size=5):
     """Embed multiple files in batches for better performance"""
     try:
         if not files:
@@ -62,8 +83,13 @@ async def embed_files_batch(files, model_name, db_path, collection_name, batch_s
         # Get the embedding model
         embedding_model = llm.get_embedding_model(model_name)
 
-        # Connect to the database
+        # Connect to the database with increased timeout
         db = sqlite_utils.Database(db_path)
+
+        # Configure SQLite for better concurrency
+        db.execute("PRAGMA journal_mode=DELETE")
+        db.execute("PRAGMA synchronous=NORMAL")
+        db.execute("PRAGMA busy_timeout=5000")
 
         # Get or create the collection
         collection = llm.Collection(collection_name, db, model=embedding_model)
@@ -99,48 +125,75 @@ async def embed_files_batch(files, model_name, db_path, collection_name, batch_s
                     f"[blue]Preparing to embed: {file_path}, tokens: {num_tokens}[/blue]"
                 )
             except Exception as e:
-                print(f"[yellow]⚠️ Failed to prepare {file_path}: {e}[/yellow]")
+                print(f"[yellow]⚠️ Failed to prepare {file_path}: {str(e)}[/yellow]")
 
-        # Process in batches
+        # Process in smaller batches to avoid locking issues
         results = []
         for i in range(0, len(batch_data), batch_size):
             batch = batch_data[i : i + batch_size]
             print(
-                f"[green]Processing batch {i // batch_size + 1}/{(len(batch_data) - 1) // batch_size + 1}[/green]"
+                f"[green]Processing batch {i // batch_size + 1}/{(len(batch_data) - 1) // batch_size + 1} - {len(batch)} files[/green]"
             )
 
-            try:
-                # Use embed_multi_with_metadata for better performance
-                collection.embed_multi_with_metadata(
-                    [(id, content, meta) for id, content, meta in batch],
-                    store=True,
-                    batch_size=batch_size,
-                )
+            # Process each file in the batch sequentially to reduce locking
+            batch_results = []
+            for file_id, content, meta in batch:
+                try:
+                    max_retries = 3
+                    retry_delay = 2
+                    success = False
 
-                # Mark successful embeddings
-                results.extend([True] * len(batch))
-            except Exception as e:
-                print(f"[red]Batch embedding failed: {e}[/red]")
-                # In case of batch failure, try individual files
-                for file_id, content, metadata in batch:
-                    try:
-                        collection.embed(
-                            file_id, content, metadata=metadata, store=True
-                        )
-                        results.append(True)
-                    except Exception as single_e:
+                    for retry in range(max_retries):
+                        try:
+                            # Create a new connection for each file to prevent locks
+                            retry_db = sqlite_utils.Database(db_path)
+                            retry_collection = llm.Collection(
+                                collection_name, retry_db, model=embedding_model
+                            )
+
+                            retry_collection.embed(
+                                file_id, content, metadata=meta, store=True
+                            )
+                            batch_results.append(True)
+                            success = True
+                            break  # Exit retry loop on success
+                        except sqlite3.OperationalError as e:
+                            if (
+                                "database is locked" in str(e)
+                                and retry < max_retries - 1
+                            ):
+                                print(
+                                    f"[yellow]⚠️ Database locked, retrying {file_id} in {retry_delay}s (attempt {retry+1}/{max_retries})[/yellow]"
+                                )
+                                await asyncio.sleep(retry_delay)
+                                retry_delay *= 2  # Exponential backoff
+                            else:
+                                raise
+
+                    if not success:
                         print(
-                            f"[red]Individual embedding failed for {file_id}: {single_e}[/red]"
+                            f"[red]Failed to embed {file_id} after {max_retries} retries[/red]"
                         )
-                        results.append(False)
+                        batch_results.append(False)
+
+                    # Add delay between files to avoid contention
+                    await asyncio.sleep(0.5)
+
+                except Exception as single_e:
+                    print(
+                        f"[red]Individual embedding failed for {file_id}: {str(single_e)}[/red]"
+                    )
+                    batch_results.append(False)
+
+            results.extend(batch_results)
 
         return results
     except Exception as e:
-        print(f"[red]Error in batch embedding: {e}[/red]")
+        print(f"[red]Error in batch embedding: {str(e)}[/red]")
         return [False] * len(files)
 
 
-# NEW FUNCTIONS FOR CHUNKS
+# FUNCTIONS FOR CHUNKS
 
 
 async def embed_chunks(file_path, model_name, db_path, collection_name):
@@ -156,7 +209,7 @@ async def embed_chunks(file_path, model_name, db_path, collection_name):
 
         print(f"[blue]Extracting chunks from: {file_path}[/blue]")
 
-        # Extract chunks using Tree-sitter
+        # Extract chunks using Tree-sitter or fallback to regex
         chunks = treesitter_utils.extract_chunks_from_file(file_path)
 
         if not chunks:
@@ -168,13 +221,21 @@ async def embed_chunks(file_path, model_name, db_path, collection_name):
         # Get the embedding model
         embedding_model = llm.get_embedding_model(model_name)
 
-        # Connect to the database
+        # Connect to the database with a longer timeout and improved settings
         db = sqlite_utils.Database(db_path)
+
+        # Ensure the database is not in WAL mode which can cause locking issues
+        db.execute("PRAGMA journal_mode=DELETE")
+        db.execute("PRAGMA synchronous=NORMAL")
+        db.execute("PRAGMA busy_timeout=5000")
+
+        # Set up the chunk tables first, before doing any embedding
+        db_utils.setup_chunk_tables(db_path)
 
         # Get or create the collection
         collection = llm.Collection(collection_name, db, model=embedding_model)
 
-        # Embed each chunk
+        # Embed each chunk with retry logic
         successfully_embedded = []
         for chunk in chunks:
             try:
@@ -200,19 +261,54 @@ async def embed_chunks(file_path, model_name, db_path, collection_name):
                     "timestamp": asyncio.get_event_loop().time(),
                 }
 
-                # Embed the chunk
-                print(f"[blue]Embedding chunk: {chunk_id}, tokens: {num_tokens}[/blue]")
-                collection.embed(
-                    chunk_id, content, metadata=chunk["metadata"], store=True
-                )
+                # Embed the chunk with retry logic
+                max_retries = 3
+                retry_delay = 2
+                success = False
 
-                successfully_embedded.append(chunk)
+                for retry in range(max_retries):
+                    try:
+                        print(
+                            f"[blue]Embedding chunk: {chunk_id}, tokens: {num_tokens}[/blue]"
+                        )
+
+                        # Create a new database connection for each embedding to avoid locks
+                        retry_db = sqlite_utils.Database(db_path)
+                        retry_collection = llm.Collection(
+                            collection_name, retry_db, model=embedding_model
+                        )
+
+                        retry_collection.embed(
+                            chunk_id, content, metadata=chunk["metadata"], store=True
+                        )
+
+                        successfully_embedded.append(chunk)
+                        success = True
+                        break
+                    except sqlite3.OperationalError as e:
+                        if "database is locked" in str(e) and retry < max_retries - 1:
+                            print(
+                                f"[yellow]⚠️ Database locked, retrying in {retry_delay}s (attempt {retry+1}/{max_retries})[/yellow]"
+                            )
+                            await asyncio.sleep(retry_delay)
+                            retry_delay *= 2  # Exponential backoff
+                        else:
+                            raise
+
+                if not success:
+                    print(
+                        f"[yellow]⚠️ Failed to embed chunk {chunk_id} after {max_retries} retries[/yellow]"
+                    )
+
+                # Add a small delay between embeddings to reduce contention
+                await asyncio.sleep(0.2)
+
             except Exception as e:
                 print(
-                    f"[yellow]⚠️ Failed to embed chunk {chunk.get('id', 'unknown')}: {e}[/yellow]"
+                    f"[yellow]⚠️ Failed to embed chunk {chunk.get('id', 'unknown')}: {str(e)}[/yellow]"
                 )
 
-        # Store chunks in the chunks table
+        # Store chunks in the chunks table only once, after all embeddings
         if successfully_embedded:
             db_utils.store_chunks(db_path, collection_name, successfully_embedded)
 
@@ -220,18 +316,17 @@ async def embed_chunks(file_path, model_name, db_path, collection_name):
             len(successfully_embedded) > 0
         )  # Success if at least one chunk was embedded
     except Exception as e:
-        print(f"[yellow]⚠️ Failed to process chunks from {file_path}: {e}[/yellow]")
+        print(f"[yellow]⚠️ Failed to process chunks from {file_path}: {str(e)}[/yellow]")
         return False
 
 
-async def embed_chunks_batch(
-    files, model_name, db_path, collection_name, batch_size=20
-):
+async def embed_chunks_batch(files, model_name, db_path, collection_name, batch_size=5):
     """Extract and embed code chunks from multiple files in batches"""
     try:
         if not files:
             return []
 
+        # Process files sequentially instead of parallel to reduce database contention
         results = []
         for file_path in files:
             # Process chunks for each file individually
@@ -241,11 +336,11 @@ async def embed_chunks_batch(
             results.append(success)
 
             # Small pause to avoid overwhelming the system
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.5)
 
         return results
     except Exception as e:
-        print(f"[red]Error in batch chunk embedding: {e}[/red]")
+        print(f"[red]Error in batch chunk embedding: {str(e)}[/red]")
         return [False] * len(files)
 
 

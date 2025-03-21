@@ -5,6 +5,7 @@ Provides commands for managing and querying hierarchical code chunks.
 
 import click
 import os
+import json
 from rich import print
 import asyncio
 import sqlite_utils
@@ -83,14 +84,17 @@ def create(
         # Check if collection exists
         try:
             if collection in db_utils.list_collections(db):
-                print(f"[yellow]⚠️ Collection '{collection}' already exists in database")
                 print(
-                    "   Use [green]--force[/green] to recreate the collection[/yellow]"
+                    f"[yellow]⚠️ Collection '{collection}' already exists in database[/yellow]"
+                )
+                print(
+                    "   [yellow]Use [green]--force[/green] to recreate the collection[/yellow]"
                 )
                 return
         except Exception as e:
-            print(f"[yellow]⚠️ Error checking collections: {e}[/yellow]")
-            print("   Continuing with database creation")
+            # Fixed unbalanced markup tags
+            print(f"[yellow]⚠️ Error checking collections: {str(e)}[/yellow]")
+            print("   [yellow]Continuing with database creation[/yellow]")
 
     # Get file list
     file_list = file_utils.get_file_list(project_dir, include_pattern, exclude_pattern)
@@ -205,9 +209,15 @@ def list(
 
     try:
         # Query for chunks
-        collection_id = db.query(
-            "SELECT id FROM collections WHERE name = ?", [collection]
-        ).fetchone()["id"]
+        collection_rows = list(
+            db.query("SELECT id FROM collections WHERE name = ?", [collection])
+        )
+
+        if not collection_rows:
+            print(f"[red]Error: Collection '{collection}' not found in database[/red]")
+            return
+
+        collection_id = collection_rows[0]["id"]
 
         query = "SELECT * FROM chunks WHERE collection_id = ?"
         params = [collection_id]
@@ -221,8 +231,6 @@ def list(
             params.append(chunk_type)
 
         # Execute the query
-        import json
-
         chunk_rows = list(db.query(query, params))
 
         # Convert to dictionaries
@@ -251,7 +259,7 @@ def list(
                 )
 
     except Exception as e:
-        print(f"[red]Error listing chunks: {e}[/red]")
+        print(f"[red]Error listing chunks: {str(e)}[/red]")
 
 
 @chunks.command()
@@ -337,8 +345,6 @@ def query(
             print(f"[blue]🧩 Filtering by chunk type: [cyan]{chunk_type}[/cyan]")
 
     # Get the results
-    import json
-
     results = db_utils.query_chunks(
         db_path, collection, query_text, limit, threshold, chunk_type
     )
@@ -427,26 +433,32 @@ def show(
         return
 
     # Get the collection ID
-    collection_id = db.query(
-        "SELECT id FROM collections WHERE name = ?", [collection]
-    ).fetchone()["id"]
+    collection_rows = list(
+        db.query("SELECT id FROM collections WHERE name = ?", [collection])
+    )
+
+    if not collection_rows:
+        print(f"[red]Error: Collection '{collection}' not found in database[/red]")
+        return
+
+    collection_id = collection_rows[0]["id"]
 
     # Get the chunk
-    import json
+    chunk_rows = list(
+        db.query(
+            "SELECT * FROM chunks WHERE id = ? AND collection_id = ?",
+            [chunk_id, collection_id],
+        )
+    )
 
-    chunk_row = db.query(
-        "SELECT * FROM chunks WHERE id = ? AND collection_id = ?",
-        [chunk_id, collection_id],
-    ).fetchone()
-
-    if not chunk_row:
+    if not chunk_rows:
         print(
             f"[red]Error: Chunk with ID '{chunk_id}' not found in collection '{collection}'[/red]"
         )
         return
 
     # Convert to dictionary
-    chunk = dict(chunk_row)
+    chunk = dict(chunk_rows[0])
     chunk["metadata"] = json.loads(chunk["metadata"])
 
     # Display chunk details
@@ -548,15 +560,24 @@ def stats(
 
     try:
         # Get the collection ID
-        collection_id = db.query(
-            "SELECT id FROM collections WHERE name = ?", [collection]
-        ).fetchone()["id"]
+        collection_rows = list(
+            db.query("SELECT id FROM collections WHERE name = ?", [collection])
+        )
+
+        if not collection_rows:
+            print(f"[red]Error: Collection '{collection}' not found in database[/red]")
+            return
+
+        collection_id = collection_rows[0]["id"]
 
         # Get total chunk count
-        total_chunks = db.query(
-            "SELECT COUNT(*) as count FROM chunks WHERE collection_id = ?",
-            [collection_id],
-        ).fetchone()["count"]
+        total_rows = list(
+            db.query(
+                "SELECT COUNT(*) as count FROM chunks WHERE collection_id = ?",
+                [collection_id],
+            )
+        )
+        total_chunks = total_rows[0]["count"] if total_rows else 0
 
         print(f"[green]📈 Total Chunks: [yellow]{total_chunks}[/yellow]")
 
@@ -587,17 +608,23 @@ def stats(
             print(f"   [blue]{row['path']}[/blue]: [yellow]{row['count']}[/yellow]")
 
         # Count top-level vs. nested chunks
-        top_level_count = db.query(
-            "SELECT COUNT(*) as count FROM chunks "
-            "WHERE collection_id = ? AND parent_id IS NULL",
-            [collection_id],
-        ).fetchone()["count"]
+        top_level_rows = list(
+            db.query(
+                "SELECT COUNT(*) as count FROM chunks "
+                "WHERE collection_id = ? AND parent_id IS NULL",
+                [collection_id],
+            )
+        )
+        top_level_count = top_level_rows[0]["count"] if top_level_rows else 0
 
-        nested_count = db.query(
-            "SELECT COUNT(*) as count FROM chunks "
-            "WHERE collection_id = ? AND parent_id IS NOT NULL",
-            [collection_id],
-        ).fetchone()["count"]
+        nested_rows = list(
+            db.query(
+                "SELECT COUNT(*) as count FROM chunks "
+                "WHERE collection_id = ? AND parent_id IS NOT NULL",
+                [collection_id],
+            )
+        )
+        nested_count = nested_rows[0]["count"] if nested_rows else 0
 
         print("[green]📊 Chunk Hierarchy:[/green]")
         print(f"   [cyan]Top-level chunks[/cyan]: [yellow]{top_level_count}[/yellow]")
@@ -637,7 +664,7 @@ def stats(
             print(f"   [cyan]{level_name}[/cyan]: [yellow]{depths[depth]}[/yellow]")
 
     except Exception as e:
-        print(f"[red]Error calculating chunk statistics: {e}[/red]")
+        print(f"[red]Error calculating chunk statistics: {str(e)}[/red]")
 
 
 # Register with main CLI

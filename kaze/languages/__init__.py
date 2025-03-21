@@ -28,7 +28,4 @@ def get_supported_languages() -> Dict[str, Type[BaseLanguageParser]]:
 
 # Import all language parsers to register them
 from kaze.languages.python import PythonParser
-from kaze.languages.javascript import JavaScriptParser
-from kaze.languages.typescript import TypeScriptParser
-from kaze.languages.java import JavaParser
 # Add more imports for other languages as needed
