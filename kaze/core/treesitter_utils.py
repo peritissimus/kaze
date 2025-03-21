@@ -4,9 +4,7 @@ This module handles the parsing of source code files using Tree-sitter,
 extracting hierarchical code chunks based on language syntax.
 """
 
-import os
-import re
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 from rich import print
 
 from kaze.languages import get_language_parser, get_supported_languages

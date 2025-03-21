@@ -8,7 +8,6 @@ import os
 from rich import print
 import asyncio
 import sqlite_utils
-from typing import Dict, List, Any, Optional
 
 from kaze.core import treesitter_utils, db_utils, embedding_utils, file_utils
 from kaze.utils import chunk_helpers

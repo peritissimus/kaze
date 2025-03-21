@@ -4,8 +4,6 @@ import sqlite_utils
 from rich import print
 import tiktoken
 import asyncio
-import json
-from typing import Dict, List, Any, Optional
 
 from kaze.core import treesitter_utils, db_utils
 

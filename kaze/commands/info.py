@@ -1,6 +1,5 @@
 import click
 from kaze.core import db_utils
-from kaze.utils import display
 import os
 from rich import print
 

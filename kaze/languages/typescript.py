@@ -4,9 +4,7 @@ Implements TypeScript-specific parsing rules for extracting code chunks.
 """
 
 from typing import Dict, List, Any, Optional
-from tree_sitter import Language, Tree, Node
-import os
-import re
+from tree_sitter import Node
 
 from kaze.languages.base import BaseLanguageParser
 from kaze.languages import register_language

@@ -108,7 +108,7 @@ def should_process_file(file_path, max_file_size_kb=100):
                 is_text_file = True
             except UnicodeDecodeError:
                 is_text_file = False
-    except Exception as e:
+    except Exception:
         print(f"Error determining if the file {file_path} is a text file, excluding")
         return False
 

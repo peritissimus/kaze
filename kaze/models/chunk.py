@@ -4,7 +4,7 @@ Defines the data structure for code chunks and their relationships.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 
 
 @dataclass

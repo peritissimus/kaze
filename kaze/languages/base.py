@@ -4,8 +4,8 @@ Defines the common interface that all language parsers must implement.
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Any, Tuple
-from tree_sitter import Language, Parser, Tree, Node
+from typing import Dict, List, Any
+from tree_sitter import Language, Parser, Node
 import os
 
 

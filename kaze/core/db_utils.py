@@ -2,7 +2,6 @@ import llm
 import sqlite3
 import sqlite_utils
 from rich import print
-from typing import Dict, List, Any, Optional
 
 
 def query_embeddings(db_path, collection_name, query_text, limit, threshold):
@@ -49,7 +48,8 @@ def get_db_size(db_path):
     """
     Returns the size of the file in human readable format
     """
-    import os, math
+    import os
+    import math
 
     file_size = os.path.getsize(db_path)
     size_name = ("B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB")

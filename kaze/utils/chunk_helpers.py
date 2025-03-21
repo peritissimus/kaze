@@ -3,13 +3,11 @@ Helper functions for working with code chunks.
 Provides utilities for managing and displaying hierarchical code chunks.
 """
 
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 from rich import print
 from rich.tree import Tree
 from rich.syntax import Syntax
 from rich.panel import Panel
-
-from kaze.models.chunk import CodeChunk
 
 
 def build_chunk_tree(chunks: List[Dict[str, Any]]) -> Dict[str, List[str]]:

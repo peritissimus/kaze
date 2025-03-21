@@ -1,7 +1,6 @@
 import click
 import llm
 from kaze.core import file_utils, embedding_utils, db_utils
-from kaze.utils import config
 import os
 from rich import print
 import asyncio
