@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.0] - 2025-03-22
+
+### Features
+
+- add authorization check before creating releases (18891b3)
+
 ## [0.7.0] - 2025-03-22
 
 ### Features
