@@ -1,5 +1,6 @@
 import click
 from kaze.commands import create, query, info
+from kaze.commands import chunks
 from kaze.utils import config
 
 
@@ -16,6 +17,6 @@ def cli(ctx):
 cli.add_command(create.create)
 cli.add_command(query.query)
 cli.add_command(info.info)
-
+cli.add_command(chunks.chunks)
 if __name__ == "__main__":
     cli()
