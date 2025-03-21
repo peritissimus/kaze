@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.2] - 2025-03-22
+
+### Code Refactoring
+
+- update config file handling and improve changelog entry logic (6bbfd4e)
+
 ## [0.8.1] - 2025-03-22
 
 ### Other
