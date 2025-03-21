@@ -55,3 +55,6 @@ site/
 # Project specific
 *.db
 *.sqlite3
+
+
+coder.sh
