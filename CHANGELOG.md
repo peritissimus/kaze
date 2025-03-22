@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.9.0] - 2025-03-22
+
+### Features
+
+- add sequential processing option and improve database handling (84509d0)
+- add chunks command to CLI interface (90ae5ff)
+- add CodeChunk model for representing code chunks (869aafe)
+- add chunk management functionality for code embedding (a2bb43f)
+- add CLI commands for managing and querying code chunks (322b155)
+- add language parsers for Python, Java, JavaScript, TypeScript, and base parser (8966629)
+
+### Bug Fixes
+
+- resolve database error handling and improve chunk queries (9c800b3)
+
+### Code Refactoring
+
+- cleanup and improve code style across multiple files (ed6e658)
+
+### Chores
+
+- update .gitignore to exclude coder.sh file (b06210a)
+
+### Other
+
+- refactor(commands, core, languages): remove unused imports and delete Java parser (ebfa75a)
+
 ## [0.8.2] - 2025-03-22
 
 ### Code Refactoring
