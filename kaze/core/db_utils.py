@@ -419,3 +419,103 @@ def get_chunk_count(db_path, collection_name):
     except Exception as e:
         print(f"[red]Error getting chunk count: {str(e)}[/red]")
         return 0
+
+
+def store_chunks_with_db(db, collection_name, chunks):
+    """
+    Store code chunks using an existing database connection.
+
+    Args:
+        db: A sqlite_utils.Database instance with an active connection
+        collection_name: Name of the collection to store chunks in
+        chunks: List of chunk dictionaries to store
+
+    Returns:
+        Boolean indicating success or failure
+    """
+    try:
+        # Check if collection exists
+        if not llm.Collection.exists(db, collection_name):
+            print(
+                f"[red]Collection '{collection_name}' does not exist in the database[/red]"
+            )
+            return False
+
+        # Get the collection ID
+        collection_rows = list(
+            db.query("SELECT id FROM collections WHERE name = ?", [collection_name])
+        )
+        if not collection_rows:
+            print(f"[red]Collection '{collection_name}' not found in database[/red]")
+            return False
+
+        collection_id = collection_rows[0]["id"]
+
+        # Set up the chunk tables (using the existing db connection)
+        db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS chunks (
+                id TEXT PRIMARY KEY,
+                collection_id INTEGER,
+                type TEXT,
+                name TEXT,
+                path TEXT,
+                start_line INTEGER,
+                start_col INTEGER,
+                end_line INTEGER,
+                end_col INTEGER,
+                parent_id TEXT,
+                content TEXT,
+                metadata TEXT,
+                updated INTEGER,
+                FOREIGN KEY (collection_id) REFERENCES collections(id)
+            )
+            """
+        )
+
+        # Create indexes if they don't exist
+        db.execute("CREATE INDEX IF NOT EXISTS chunks_parent_id ON chunks(parent_id)")
+        db.execute("CREATE INDEX IF NOT EXISTS chunks_path ON chunks(path)")
+        db.execute("CREATE INDEX IF NOT EXISTS chunks_type ON chunks(type)")
+
+        # Prepare chunks for insertion
+        import json
+        import time
+
+        now = int(time.time())
+
+        # Begin transaction for bulk insert
+        with db.conn:  # This ensures proper transaction handling
+            # Insert chunks one by one
+            for chunk in chunks:
+                db.execute(
+                    """
+                    INSERT OR REPLACE INTO chunks 
+                    (id, collection_id, type, name, path, start_line, start_col, 
+                    end_line, end_col, parent_id, content, metadata, updated)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        chunk["id"],
+                        collection_id,
+                        chunk["type"],
+                        chunk["name"],
+                        chunk["path"],
+                        chunk["start_line"],
+                        chunk["start_col"],
+                        chunk["end_line"],
+                        chunk["end_col"],
+                        chunk.get("parent_id"),
+                        chunk["content"],
+                        json.dumps(chunk.get("metadata", {})),
+                        now,
+                    ],
+                )
+
+        print(
+            f"[green]✓ Stored {len(chunks)} chunks in collection '{collection_name}'[/green]"
+        )
+        return True
+    except Exception as e:
+        print(f"[red]❌ Error storing chunks: {str(e)}[/red]")
+        return False

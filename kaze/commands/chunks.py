@@ -33,7 +33,7 @@ def chunks():
     "-m", "--model", default="text-embedding-3-small", help="Embedding model to use."
 )
 @click.option("-s", "--size", default=100, type=int, help="Maximum file size in KB.")
-@click.option("-b", "--batch", default=20, type=int, help="Batch size for processing.")
+@click.option("-b", "--batch", default=5, type=int, help="Batch size for processing.")
 @click.option("-c", "--collection", default="chunks", help="Collection name.")
 @click.option(
     "-f", "--force", is_flag=True, help="Force recreation of embeddings database."
@@ -50,6 +50,12 @@ def chunks():
     default=None,
     help="Additional files to exclude (glob pattern).",
 )
+@click.option(
+    "--sequential",
+    is_flag=True,
+    default=True,
+    help="Process files sequentially (recommended to avoid database locks).",
+)
 def create(
     project_dir,
     output_dir,
@@ -60,6 +66,7 @@ def create(
     force,
     include_pattern,
     exclude_pattern,
+    sequential,
 ):
     """Create code chunk embeddings for files in the project."""
     project_dir = os.path.abspath(project_dir)
@@ -69,21 +76,58 @@ def create(
     print(f"[blue]🔍 Processing files in [cyan]{project_dir}[/cyan]")
     print(f"[blue]💾 Chunk embeddings will be saved to [cyan]{db_path}[/cyan]")
     print(f"[blue]🧠 Using model: [cyan]{model}[/cyan]")
+    print(
+        f"[blue]⚙️ Processing mode: [cyan]{'Sequential' if sequential else 'Batch'} (batch size: {batch})[/cyan]"
+    )
 
     os.makedirs(kaze_dir, exist_ok=True)
 
-    # Initialize the database
-    db = sqlite_utils.Database(db_path)
-
-    # Handle force flag
+    # Handle force flag - need to modify this to properly close connections
     if force and os.path.exists(db_path):
         print("[yellow]⚠️ Force flag set - removing existing database[/yellow]")
-        os.remove(db_path)
-        db = sqlite_utils.Database(db_path)  # Reconnect to the new DB
-    elif os.path.exists(db_path):
-        # Check if collection exists
+        # Ensure no connections to DB before removing
         try:
-            if collection in db_utils.list_collections(db):
+            # Try to release any existing connections explicitly
+            import sqlite3
+
+            conn = sqlite3.connect(db_path)
+            conn.close()
+            del conn
+        except:
+            pass
+
+        # Small delay to ensure connections are closed
+        import time
+
+        time.sleep(0.5)
+
+        try:
+            os.remove(db_path)
+            print("[green]✓ Removed existing database[/green]")
+        except Exception as e:
+            print(f"[red]❌ Error removing database: {str(e)}[/red]")
+            print(
+                "[yellow]⚠️ This may be due to open connections. Try closing them first.[/yellow]"
+            )
+            return
+
+    elif os.path.exists(db_path):
+        # Check if collection exists - using a more robust approach
+        try:
+            # Connect with a timeout to handle locks
+            import sqlite3
+
+            conn = sqlite3.connect(db_path, timeout=5.0)
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=5000")
+
+            # Check for collection
+            cursor.execute("SELECT name FROM collections WHERE name = ?", (collection,))
+            result = cursor.fetchone()
+            conn.close()
+
+            if result:
                 print(
                     f"[yellow]⚠️ Collection '{collection}' already exists in database[/yellow]"
                 )
@@ -92,7 +136,6 @@ def create(
                 )
                 return
         except Exception as e:
-            # Fixed unbalanced markup tags
             print(f"[yellow]⚠️ Error checking collections: {str(e)}[/yellow]")
             print("   [yellow]Continuing with database creation[/yellow]")
 
@@ -125,41 +168,114 @@ def create(
         f"[green]📊 Found [yellow]{len(supported_files)}[/yellow] supported files to process[/green]"
     )
 
-    # Process files in batches using async
-    async def process_files():
+    # Add handler for graceful shutdown with Ctrl+C
+    import signal
+
+    # Flag to track if processing should stop
+    should_stop = False
+
+    def signal_handler(sig, frame):
+        nonlocal should_stop
+        if not should_stop:
+            print(
+                "\n[yellow]⚠️ Received interrupt signal. Finishing current file and then exiting...[/yellow]"
+            )
+            should_stop = True
+        else:
+            print(
+                "\n[red]❌ Forced exit. Database may be in an inconsistent state.[/red]"
+            )
+            import sys
+
+            sys.exit(1)
+
+    # Set up the signal handler
+    signal.signal(signal.SIGINT, signal_handler)
+
+    # Process files sequentially to avoid locking issues
+    async def process_files_sequential():
+        results = []
+
+        for i, file_path in enumerate(supported_files):
+            if should_stop:
+                print("[yellow]⚠️ Processing stopped due to user interrupt[/yellow]")
+                break
+
+            print(
+                f"[blue]Processing file {i+1}/{len(supported_files)}: {file_path}[/blue]"
+            )
+
+            # Process each file individually
+            success = await embedding_utils.embed_chunks(
+                file_path, model, db_path, collection
+            )
+            results.append(success)
+
+            # Add a progress indicator
+            success_count = results.count(True)
+            fail_count = len(results) - success_count
+            print(
+                f"[green]Progress: {i+1}/{len(supported_files)} ({success_count} succeeded, {fail_count} failed)[/green]"
+            )
+
+        return results
+
+    # Process files in batches (legacy mode, more prone to locking)
+    async def process_files_batch():
         results = await embedding_utils.embed_chunks_batch(
             supported_files, model, db_path, collection, batch
         )
         return results
 
-    # Run the async batch processing
-    results = asyncio.run(process_files())
+    # Choose the processing function based on the sequential flag
+    processing_func = process_files_sequential if sequential else process_files_batch
 
-    # Count successes and failures
-    success_count = results.count(True) if results else 0
-    fail_count = len(results) - success_count if results else 0
+    try:
+        # Run the chosen processing function
+        results = asyncio.run(processing_func())
 
-    print(
-        f"\n[green]Processing complete! Successfully processed [yellow]{success_count}[/yellow] files, failed to process [yellow]{fail_count}[/yellow] files.[/green]"
-    )
+        # Count successes and failures
+        success_count = results.count(True) if results else 0
+        fail_count = len(results) - success_count if results else 0
 
-    if os.path.exists(db_path):
         print(
-            f"[green]✅ Chunk embeddings successfully created and saved to [cyan]{db_path}[/cyan]"
+            f"\n[green]Processing complete! Successfully processed [yellow]{success_count}[/yellow] files, failed to process [yellow]{fail_count}[/yellow] files.[/green]"
         )
-        print(
-            f"[green]🔢 Database size: [yellow]{file_utils.get_file_size(db_path)}[/yellow][/green]"
-        )
-        print("[green]📚 Collections in database:[/green]")
-        db_utils.show_collections(db_path)
 
-        # Show chunk statistics
-        chunk_count = db_utils.get_chunk_count(db_path, collection)
-        print(f"[green]🧩 Total chunks: [yellow]{chunk_count}[/yellow][/green]")
-    else:
-        print("[red]❌ Error: Failed to create embeddings database[/red]")
+        if os.path.exists(db_path):
+            print(
+                f"[green]✅ Chunk embeddings successfully created and saved to [cyan]{db_path}[/cyan]"
+            )
+            print(
+                f"[green]🔢 Database size: [yellow]{file_utils.get_file_size(db_path)}[/yellow][/green]"
+            )
 
-    print("[green]🎉 All done![/green]")
+            # Connect with a timeout to avoid locks when showing collections
+            try:
+                import sqlite3
+
+                conn = sqlite3.connect(db_path, timeout=5.0)
+                db = sqlite_utils.Database(conn)
+
+                print("[green]📚 Collections in database:[/green]")
+                db_utils.show_collections(db_path)
+
+                # Show chunk statistics - with a timeout
+                chunk_count = db_utils.get_chunk_count(db_path, collection)
+                print(f"[green]🧩 Total chunks: [yellow]{chunk_count}[/yellow][/green]")
+
+                conn.close()
+            except Exception as e:
+                print(f"[yellow]⚠️ Error displaying database info: {str(e)}[/yellow]")
+        else:
+            print("[red]❌ Error: Failed to create embeddings database[/red]")
+
+        print("[green]🎉 All done![/green]")
+
+    except KeyboardInterrupt:
+        print("\n[yellow]⚠️ Process interrupted by user[/yellow]")
+    except Exception as e:
+        print(f"[red]❌ Error processing files: {str(e)}[/red]")
 
 
 @chunks.command()
