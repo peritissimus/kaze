@@ -1,11 +1,29 @@
 # Kaze
 
-Kaze is a unified tool for creating and querying vector embeddings of your project files. It helps you semantically search through your codebase to find relevant files and snippets based on natural language queries.
+Kaze is a unified tool for creating and querying vector embeddings of your project files. It helps you semantically search through your codebase to find relevant files and code chunks based on natural language queries.
 
+## Features
+
+- **File Embeddings**: Create embeddings for entire files in your project
+- **Code Chunk Extraction**: Extract and embed individual code chunks (functions, classes, methods) for more precise searching
+- **Semantic Search**: Query your codebase using natural language
+- **Tree-sitter Integration**: Language-aware code parsing (when Tree-sitter is available)
+- **Hierarchical Chunks**: Understand parent-child relationships between code elements
+- **Flexible Output**: Human-readable or JSON output for integration with other tools
+
+## Installation
+
+```bash
+# Install from PyPI
+pip install kaze
+
+# Or install with development dependencies
+pip install kaze[dev]
+```
 
 ## Usage
 
-### Creating Embeddings
+### Creating File Embeddings
 
 ```bash
 # Create embeddings for the current directory
@@ -27,7 +45,7 @@ Options:
 - `--exclude`: Additional files to exclude (glob pattern)
 - `--verify`: Verify embedding model is available
 
-### Querying Embeddings
+### Querying File Embeddings
 
 ```bash
 # Search for files related to a query
@@ -35,6 +53,9 @@ kaze query --query "database connection function"
 
 # Get only the best match with content
 kaze query --query "file handling utilities" --best --show-content
+
+# Get matching files with context
+kaze query --query "error handling" --context 10
 ```
 
 Options:
@@ -49,6 +70,72 @@ Options:
 - `--best`: Only show the single best matching result
 - `--context`: Number of lines of context to show around the matching part
 
+### Working with Code Chunks
+
+#### Creating Chunk Embeddings
+
+```bash
+# Create code chunk embeddings
+kaze chunks create
+
+# Create chunks with custom settings
+kaze chunks create --dir /path/to/project --model text-embedding-3-small --collection code-chunks
+```
+
+Options:
+- Same options as `kaze create`, plus:
+- `--sequential`: Process files sequentially (recommended to avoid database locks) (default: True)
+
+#### Querying Chunks
+
+```bash
+# Search for code chunks related to a query
+kaze chunks query --query "database connection retry logic"
+
+# Filter by chunk type
+kaze chunks query --query "parse file content" --type function --show-content
+```
+
+Options:
+- Same options as `kaze query`, plus:
+- `-y, --type`: Filter by chunk type (class, function, method, etc.)
+
+#### Listing Chunks
+
+```bash
+# List all chunks
+kaze chunks list
+
+# List chunks in a specific file
+kaze chunks list --file "core/file_utils.py"
+
+# List chunks of a specific type
+kaze chunks list --type class
+
+# Show chunks as a tree
+kaze chunks list --tree
+```
+
+#### Viewing Chunk Details
+
+```bash
+# Show details of a specific chunk
+kaze chunks show --id "path/to/file.py:function:get_file_list:123"
+
+# Show chunk with its children
+kaze chunks show --id "path/to/file.py:class:Parser:45" --show-children
+
+# Show chunk with its parent hierarchy
+kaze chunks show --id "path/to/file.py:method:parse:78" --show-ancestors
+```
+
+#### Chunk Statistics
+
+```bash
+# Show statistics about chunks
+kaze chunks stats
+```
+
 ### Getting Database Info
 
 ```bash
@@ -60,6 +147,23 @@ Options:
 - `-d, --dir`: Project directory (default: current directory)
 - `-o, --output`: Output directory (default: `.kaze` in project directory)
 
+## Advanced Features
+
+### Language Support
+
+Kaze currently supports code chunk extraction for:
+- Python
+- More languages coming soon
+
+When Tree-sitter is available, Kaze can provide more accurate code chunk extraction.
+
+### Database Structure
+
+Kaze uses SQLite with the following optimizations:
+- Write-Ahead Logging for better concurrency
+- Connection pooling to reduce locking issues
+- Retry mechanisms for database operations
+
 ## Requirements
 
 - Python 3.6+
@@ -68,6 +172,7 @@ Options:
 - rich
 - tiktoken
 - sqlite-utils
+- tree-sitter (optional, for improved code parsing)
 
 ## Development
 
@@ -75,6 +180,12 @@ This project uses conventional commits for versioning. You can update the versio
 
 ```bash
 python scripts/version.py
+```
+
+To create a release:
+
+```bash
+python scripts/release.py
 ```
 
 ## License
